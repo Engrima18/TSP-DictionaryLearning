@@ -93,7 +93,7 @@ class EnhancedGraph(nx.Graph):
 
     @memoize_to_pickle()
     def get_b2(self, p_max_len=np.inf):
-        '''Compute a modified cycle-edge incidence matrix with QR decomposition and rank considerations.
+        '''Compute an edge-triangle incidence matrix with QR decomposition and rank considerations.
         '''
         E_list = list(self.edges)
         All_P = self.get_cycles(self, p_max_len)
