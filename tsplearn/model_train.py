@@ -12,7 +12,6 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
     X = np.tile(X, (s,1))
     discard = 0
 
-    # maybe is better to create a wrapper
     def multiplier_search(*arrays, s=s):
         is_okay = 0
         mult = 100
@@ -46,19 +45,17 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
         return h, discard
 
     if (only == "only_D") or (only == "all"):
-        # Joint Dictionary Model
+        
         if dictionary_type == "joint":
             Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
             h, discard = multiplier_search(lambda_max_k, lambda_min_k)
             D = generate_dictionary(h, s, Lk)
 
-        # Edge Laplacian Dictionary Model
         elif dictionary_type == "edge_laplacian":
             Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Ld, K)
             h, discard = multiplier_search(lambda_max_k, lambda_min_k)
             D = generate_dictionary(h, s, Lk)
 
-        # Separated Dictionary Model
         elif dictionary_type == "separated":
             Luk, lambda_max_u_k, lambda_min_u_k = compute_Lk_and_lambdak(Lu, K, separated=True)
             Ldk, lambda_max_d_k, lambda_min_d_k = compute_Lk_and_lambdak(Ld, K, separated=True)
