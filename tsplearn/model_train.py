@@ -2,7 +2,7 @@ import scipy.linalg as sla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
-import data_preproc as dp
+from .data_gen import *
 
 def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only):
 
@@ -19,7 +19,7 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
         tries = 0
         while is_okay==0:
             is_okay = 1
-            h, c_try, _, tmp_sum_min, tmp_sum_max = dp.generate_coeffs(arrays, s=s, mult=mult)
+            h, c_try, _, tmp_sum_min, tmp_sum_max = generate_coeffs(arrays, s=s, mult=mult)
             if c_try <= c:
                 is_okay *= 1
             if tmp_sum_min > c-epsilon:
@@ -48,22 +48,22 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
     if (only == "only_D") or (only == "all"):
         # Joint Dictionary Model
         if dictionary_type == "joint":
-            Lk, lambda_max_k, lambda_min_k = dp.compute_Lk_and_lambdak(Lu + Ld, K)
+            Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
             h, discard = multiplier_search(lambda_max_k, lambda_min_k)
-            D = dp.generate_dictionary(h, s, Lk)
+            D = generate_dictionary(h, s, Lk)
 
         # Edge Laplacian Dictionary Model
         elif dictionary_type == "edge_laplacian":
-            Lk, lambda_max_k, lambda_min_k = dp.compute_Lk_and_lambdak(Ld, K)
+            Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Ld, K)
             h, discard = multiplier_search(lambda_max_k, lambda_min_k)
-            D = dp.generate_dictionary(h, s, Lk)
+            D = generate_dictionary(h, s, Lk)
 
         # Separated Dictionary Model
         elif dictionary_type == "separated":
-            Luk, lambda_max_u_k, lambda_min_u_k = dp.compute_Lk_and_lambdak(Lu, K, separated=True)
-            Ldk, lambda_max_d_k, lambda_min_d_k = dp.compute_Lk_and_lambdak(Ld, K, separated=True)
+            Luk, lambda_max_u_k, lambda_min_u_k = compute_Lk_and_lambdak(Lu, K, separated=True)
+            Ldk, lambda_max_d_k, lambda_min_d_k = compute_Lk_and_lambdak(Ld, K, separated=True)
             h, discard = multiplier_search(lambda_max_d_k, lambda_min_d_k, lambda_max_u_k, lambda_min_u_k)
-            D = dp.generate_dictionary(h, s, Luk, Ldk)
+            D = generate_dictionary(h, s, Luk, Ldk)
     
     if (only == "only_X" or only == "all"):
         
@@ -77,7 +77,7 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
         W = np.diag(1./dd)
         Dx = Dx / la.norm(Dx)  
         Domp = Dx@W
-        X = np.apply_along_axis(lambda x: dp.get_omp_coeff(K0, Domp.real, x), axis=0, arr=Y_train)
+        X = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp.real, x), axis=0, arr=Y_train)
         X = np.tile(X, (s,1))
         
     return D, X, discard
@@ -92,12 +92,12 @@ def topological_dictionary_learn(Y_train, Y_test, K, n, s, D0, X0, Lu, Ld, dicti
 
     if dictionary_type != "fourier":
         if dictionary_type=="joint":
-            Lk, _, _ = dp.compute_Lk_and_lambdak(Lu + Ld, K)
+            Lk, _, _ = compute_Lk_and_lambdak(Lu + Ld, K)
         elif dictionary_type=="edge_laplacian":
-            Lk, _, _ = dp.compute_Lk_and_lambdak(Ld, K)
+            Lk, _, _ = compute_Lk_and_lambdak(Ld, K)
         elif dictionary_type=="separated":
-            Luk, _, _ = dp.compute_Lk_and_lambdak(Lu, K, separated=True)
-            Ldk, _, _ = dp.compute_Lk_and_lambdak(Ld, K, separated=True)
+            Luk, _, _ = compute_Lk_and_lambdak(Lu, K, separated=True)
+            Ldk, _, _ = compute_Lk_and_lambdak(Ld, K, separated=True)
 
         # Init the dictionary and the sparse representation 
         D_coll = [cp.Constant(D0[:,(n*i):(n*(i+1))]) for i in range(s)]
@@ -165,8 +165,8 @@ def topological_dictionary_learn(Y_train, Y_test, K, n, s, D0, X0, Lu, Ld, dicti
             dd = la.norm(D, axis=0)
             W = np.diag(1. / dd)
             Domp = D @ W
-            X_train = np.apply_along_axis(lambda x: dp.get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_train)
-            X_test = np.apply_along_axis(lambda x: dp.get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_test)
+            X_train = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_train)
+            X_test = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_test)
             # Normalize?
             X_train = W @ X_train
             X_test = W @ X_test
@@ -203,8 +203,8 @@ def topological_dictionary_learn(Y_train, Y_test, K, n, s, D0, X0, Lu, Ld, dicti
         W = np.diag(1./dd)  
         D_opt = D_opt / la.norm(D_opt)
         Domp = D_opt@W
-        X_opt_train = np.apply_along_axis(lambda x: dp.get_omp_coeff(K0, Domp=Domp.real, col=x), axis=0, arr=Y_train)
-        X_opt_test = np.apply_along_axis(lambda x: dp.get_omp_coeff(K0, Domp=Domp.real, col=x), axis=0, arr=Y_test)
+        X_opt_train = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp.real, col=x), axis=0, arr=Y_train)
+        X_opt_test = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp.real, col=x), axis=0, arr=Y_test)
         X_opt_train = W @ X_opt_train
         X_opt_test = W @ X_opt_test
         # Error Updating
