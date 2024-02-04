@@ -8,10 +8,12 @@ def plot_error_curves(min_error_fou_test,
                       min_error_joint_test,
                       min_error_sep_test,
                       n_sim,
-                      K0_coll):
+                      K0_coll,
+                      dictionary_type,
+                      dict_types):
     """Plots the error curves for Fourier, Edge and Joint tests"""
     
-    TITLE = "Edge Laplacian"
+    TITLE = [dict_types[typ] for typ in dict_types.keys() if typ in dictionary_type][0]
 
     res_df = pd.DataFrame()
     dict_types = {"fou": "Fourier", "edge": "Edge Laplacian", "joint": "Hodge Laplacian", "sep": "Separated Hodge Laplacian"}
