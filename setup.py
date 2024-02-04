@@ -22,7 +22,7 @@ setup(
     },
     author='Enrico Grimaldi',
     author_email='engrima2000@gmail.com',
-    description='A short description of your project.',
-    keywords='Some keywords relevant to your project',
+    description='',
+    keywords='',
     url='https://github.com/Engrima18/TSP-DictionaryLearning',  
 )
