@@ -1,8 +1,6 @@
 import pickle
 import os
 import dill
-import matplotlib.pyplot as plt
-import seaborn as sns
 from tsplearn import curves_plot
 
 def show_and_save(dictionary_type,
