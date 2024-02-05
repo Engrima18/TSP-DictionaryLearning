@@ -7,19 +7,18 @@ def plot_error_curves(min_error_fou_test,
                       min_error_edge_test,
                       min_error_joint_test,
                       min_error_sep_test,
-                      n_sim,
                       K0_coll,
-                      dictionary_type,
-                      dict_types):
+                      dictionary_type):
     """Plots the error curves for Fourier, Edge and Joint tests"""
-    
+
+    dict_types = {"fou": "Fourier", "edge": "Edge Laplacian", "joint": "Hodge Laplacian", "sep": "Separated Hodge Laplacian"}
     TITLE = [dict_types[typ] for typ in dict_types.keys() if typ in dictionary_type][0]
 
     res_df = pd.DataFrame()
-    dict_types = {"fou": "Fourier", "edge": "Edge Laplacian", "joint": "Hodge Laplacian", "sep": "Separated Hodge Laplacian"}
+    n_sim = min_error_fou_test.shape[0]
 
     for d in dict_types.items():
-        for sim in range(n_sim):
+        for _ in range(n_sim):
             tmp_df = pd.DataFrame()   
             tmp_df["Error"] = eval(f'min_error_{d[0]}_test[sim,:]')
             tmp_df["Sparsity"] = K0_coll

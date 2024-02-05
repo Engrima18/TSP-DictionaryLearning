@@ -5,6 +5,7 @@ from tqdm import tqdm
 import warnings
 import logging
 from tsplearn import *
+from res import show_and_save
 
 def setup_logging():
     logging.basicConfig(filename='simulation_log.txt', level=logging.INFO,
@@ -168,6 +169,8 @@ def run_simulation(args):
                                                                                             , dict_errors[d[0]][1][sim+1,k0_index])
 
     logging.info("Dictionary learning completed successfully.")
+
+    show_and_save()
 
 if __name__ == "__main__":
     args = parse_arguments()
