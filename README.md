@@ -26,7 +26,7 @@ In fact, the package provides code useful for:
 - learn a sparse representation of graph signals through the implementation of the dictionary learning algorithm via an **iterative aternating optimization** procedure;
 - compare different learning algorithms and empirically demonstrate the generalization capabilities and the advantages given by introducing topological information (via _Hodge theory_) into the algorithm itself.
 
-Take a look at how the code works and plot your own simulation results <a target="_blank" href="https://colab.research.google.com/github/Engrima18/TSP-DictionaryLearning/blob/main/samples/sample.ipynb">
+Take a look at how the code works and plot your own simulation results <a target="_blank" href="https://colab.research.google.com/github/Engrima18/TSP-DictionaryLearning/blob/main/sample.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
