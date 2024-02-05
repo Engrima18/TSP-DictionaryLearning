@@ -24,16 +24,16 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
     python_requires='>=3.7',
-    entry_points={
-        'console_scripts': [
-            '',
-        ],
-    },
+    # entry_points={
+    #     'console_scripts': [
+    #         '',
+    #     ],
+    # },
     author='Engrima18',
     author_email='engrima2000@gmail.com',
     description='Topological Signal Processing Dictionary Learning Framework',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     keywords='',
-    url='https://github.com/Engrima18/TSP-DictionaryLearning',  
+    url='https://github.com/Engrima18/TSP-DictionaryLearning'
 )
