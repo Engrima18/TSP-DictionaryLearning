@@ -67,21 +67,24 @@ TSP-DictionaryLearning/
 |   
 │
 ├── results/        # Saved plot figures, notebook environments and variables
-│   ├── edge_laplacian/     # Results for 'Edge Laplacian' syntethic signals
+│   ├── edge_laplacian/     # Results for 'Edge Laplacian' synthetic signals
 │       ├── error.pkl            # Errors values for different learning algorithms
 │       ├── ipynb_env.db         # Jupyter notebook environment for main results reproducibility
 │       ├── plot.png             # Final results plot for learning strategy comparison
-│   ├── joint               # Results for 'Hodge Laplacian' syntethic signals
+│   ├── joint               # Results for 'Hodge Laplacian' synthetic signals
 │       └── ...
-│   └── separated           # Results for 'Separated Hodge Laplacian' syntethic signals
+│   └── separated           # Results for 'Separated Hodge Laplacian' synthetic signals
 │       └── ...
 │
+|
 ├── cache/         # Caching results of intermediate functions
 │   └── ...
+|
 |
 ├── tests/         # Unit tests
 │   └── ...
 │
+|
 ├── README.md              # Project overview and usage instructions
 ├── requirements.txt       # Dependencies list
 └── setup.py               # Package installation script
