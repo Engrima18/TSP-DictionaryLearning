@@ -3,9 +3,24 @@ import numpy.linalg as la
 import pandas as pd
 from scipy.sparse.linalg import eigs
 from sklearn.linear_model import OrthogonalMatchingPursuit
+from typing import Tuple, List, Union
 
 
-def compute_Lk_and_lambdak(L, K, separated=False):
+def compute_Lk_and_lambdak(L: np.ndarray,
+                           K: int, 
+                           separated: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute powers of L up to K and the maximum and minimum eigenvalues raised to the powers of 1 through K.
+
+    Parameters:
+    - L (np.ndarray): The Laplacian matrix.
+    - K (int): The highest power to compute.
+    - separated (bool, optional): If True, compute separated eigenvalue ranges. Defaults to False.
+
+    Returns:
+    - Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing Lk, lambda_max_k, and lambda_min_k.
+    """
+
     lambdas, _ = eigs(L)
     lambdas[np.abs(lambdas) < np.finfo(float).eps] = 0
     lambda_max = np.max(lambdas).real
@@ -18,13 +33,23 @@ def compute_Lk_and_lambdak(L, K, separated=False):
     else:
         lambda_max_k = lambda_max ** np.array(list(np.arange(1, K + 1))+[0])
         lambda_min_k = lambda_min ** np.array(list(np.arange(1, K + 1))+[0])
+
     return Lk, lambda_max_k, lambda_min_k
 
 
-def generate_coeffs(*arrays, s, mult=10):
-    """ 
-    Select ad hoc parameters for synthetic data generation, randomly over
-    an interval dependent on the max eigenvalues of the Laplacian(s)
+def generate_coeffs(*arrays: np.ndarray, 
+                    s: int, 
+                    mult: int = 10) -> Tuple[np.ndarray, float, float, float, float]:
+    """
+    Generate coefficients for synthetic data generation.
+
+    Parameters:
+    - arrays (np.ndarray): Variable number of arrays specifying eigenvalues.
+    - s (int): Number of samples.
+    - mult (int, optional): Multiplier for coefficient generation. Defaults to 10.
+
+    Returns:
+    - Tuple[np.ndarray, float, float, float, float]: Coefficients and control variables.
     """
 
     # if passing four arguments (two for upper and two for lower laplacian eigevals)
@@ -64,10 +89,27 @@ def generate_coeffs(*arrays, s, mult=10):
     else:
         raise ValueError("Function accepts either 2 or 4 arrays! In case of 4 arrays are provided,\
                         the first 2 refer to upper laplacian and the other two to lower laplacian.")
+    
     return h, c, epsilon, tmp_sum_min, tmp_sum_max
 
 
-def generate_dictionary(h, s, *matrices):
+def generate_dictionary(h: np.ndarray, 
+                        s: int, 
+                        *matrices: np.ndarray) -> np.ndarray:
+    """
+    Generate a dictionary matrix as a concatenation of sub-dictionary matrices. Each of the sub-dictionary 
+    matrices is generated from given coefficients and a Laplacian matrix (or matrices if discriminating between
+    upper and lower Laplacian).
+
+    Parameters:
+    - h (np.ndarray): Coefficients for linear combination.
+    - s (int): Number of kernels (number of sub-dictionaries).
+    - matrices (np.ndarray): Laplacian matrices.
+
+    Returns:
+    - np.ndarray: Generated dictionary matrix.
+    """
+
     D = []
     # Check if upper and lower Laplacians are separately provided
     if len(matrices)==1:
@@ -96,7 +138,32 @@ def generate_dictionary(h, s, *matrices):
     return D
 
 
-def create_ground_truth(Lu, Ld, m_train, m_test, s, K, K0, dictionary_type, sparsity_mode):
+def create_ground_truth(Lu: np.ndarray, 
+                        Ld: np.ndarray, 
+                        m_train: int, 
+                        m_test: int, 
+                        s: int, 
+                        K: int, 
+                        K0: int,
+                        dictionary_type: str, 
+                        sparsity_mode: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
+    """
+    Create ground truth data for testing dictionary learning algorithms.
+
+    Parameters:
+    - Lu (np.ndarray): Upper Laplacian matrix.
+    - Ld (np.ndarray): Lower Laplacian matrix.
+    - m_train (int): Number of training samples.
+    - m_test (int): Number of testing samples.
+    - s (int): Number of kernels (sub-dictionaries).
+    - K (int): Maximum power of Laplacian matrices.
+    - K0 (int): Maximum number of non-zero coefficients.
+    - dictionary_type (str): Type of dictionary.
+    - sparsity_mode (str): Mode of sparsity.
+
+    Returns:
+    - Tuple: Generated dictionary, coefficients, training and test data, epsilon, and sparse representation of training and test data.
+    """
 
     if dictionary_type == "joint":
         Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
@@ -117,7 +184,7 @@ def create_ground_truth(Lu, Ld, m_train, m_test, s, K, K0, dictionary_type, spar
     n = D.shape[0]
 
     # Signal Generation
-    def create_column_vec(row,n, s):
+    def _create_column_vec(row,n, s):
         tmp = np.zeros(n*s)
         tmp[row['idxs']]=row['non_zero_coeff']
         return tmp
@@ -136,7 +203,7 @@ def create_ground_truth(Lu, Ld, m_train, m_test, s, K, K0, dictionary_type, spar
     # for each of the K0 row indexes in each column, sample K0 values
     tmp['non_zero_coeff'] = tmp.K0.apply(lambda x: np.random.randn(x))
     # create the column vectors with the desired characteristics
-    tmp['column_vec'] = tmp.apply(lambda x: create_column_vec(x,n=n, s=s), axis=1)
+    tmp['column_vec'] = tmp.apply(lambda x: _create_column_vec(x,n=n, s=s), axis=1)
     # finally derive the sparse signal representation matrix
     X = np.column_stack(tmp['column_vec'].values)
 
@@ -149,12 +216,45 @@ def create_ground_truth(Lu, Ld, m_train, m_test, s, K, K0, dictionary_type, spar
     return D, h, train_Y, test_Y, epsilon, c, X_train, X_test
 
 
-def get_omp_coeff(K0, Domp, col):
+def get_omp_coeff(K0: int, 
+                  Domp: np.ndarray, 
+                  col: np.ndarray) -> np.ndarray:
+    """
+    Compute the coefficients using Orthogonal Matching Pursuit.
+
+    Args:
+        K0 (int): Number of non-zero coefficients.
+        Domp (np.ndarray): Dictionary matrix.
+        col (np.ndarray): Target column vector.
+
+    Returns:
+        np.ndarray: Coefficients.
+    """
+
     omp = OrthogonalMatchingPursuit(n_nonzero_coefs=K0)
     omp.fit(Domp, col)
     return omp.coef_
 
-def verify_dic(D, Y_train, X_train_true, K0_max, acc_thresh):
+
+def verify_dic(D: np.ndarray, 
+               Y_train: np.ndarray, 
+               X_train_true: np.ndarray,
+               K0_max: int, 
+               acc_thresh: float) -> Tuple[int, float]:
+    """
+    Verify dictionary using Orthogonal Matching Pursuit.
+
+    Args:
+        D (np.ndarray): Dictionary matrix.
+        Y_train (np.ndarray): Training data.
+        X_train_true (np.ndarray): True training data.
+        K0_max (int): Maximum number of non-zero coefficients.
+        acc_thresh (float): Accuracy threshold.
+
+    Returns:
+        Tuple[int, float]: Maximum possible sparsity and final accuracy.
+    """
+
     # OMP
     dd = la.norm(D, axis=0)
     W = np.diag(1. / dd)  
