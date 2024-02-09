@@ -77,11 +77,8 @@ def initialize_simulation_variables(n,s,n_sim,m_train,m_test,n_search=3000):
 
 def run_simulation(args):
 
-    # Suppress warnings and setup logging
     warnings.filterwarnings('ignore')
     setup_logging()
-
-    # Log the simulation parameters
     logging.info(f"Starting simulation with parameters: {args}")
 
     # Load the graph with user-defined parameters
