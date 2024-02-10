@@ -3,7 +3,7 @@ import numpy.linalg as la
 import pandas as pd
 from scipy.sparse.linalg import eigs
 from sklearn.linear_model import OrthogonalMatchingPursuit
-from typing import Tuple, List, Union
+from typing import Tuple, Union
 
 
 def compute_Lk_and_lambdak(L: np.ndarray,
@@ -162,7 +162,8 @@ def create_ground_truth(Lu: np.ndarray,
     - sparsity_mode (str): Mode of sparsity.
 
     Returns:
-    - Tuple: Generated dictionary, coefficients, training and test data, epsilon, and sparse representation of training and test data.
+    - Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
+      Generated dictionary, coefficients, training and test data, epsilon, and sparse representation of training and test data.
     """
 
     if dictionary_type == "joint":
@@ -242,7 +243,7 @@ def verify_dic(D: np.ndarray,
                K0_max: int, 
                acc_thresh: float) -> Tuple[int, float]:
     """
-    Verify dictionary using Orthogonal Matching Pursuit.
+    Verify dictionary using Orthogonal Matching Pursuit by evaluating the sparse approximation for several levels of sparsity
 
     Args:
         D (np.ndarray): Dictionary matrix.

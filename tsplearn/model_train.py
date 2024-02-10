@@ -3,8 +3,37 @@ import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
 from .data_gen import *
+from typing import Tuple
 
-def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only):
+def initialize_dic(Lu: np.ndarray,
+                   Ld: np.ndarray, 
+                   s: int, 
+                   K: int, 
+                   Y_train: np.ndarray, 
+                   K0: int,
+                   dictionary_type: str, 
+                   c: float, 
+                   epsilon: float, 
+                   only: str) -> Tuple[np.ndarray, np.ndarray, bool]:
+    """
+    Initialize the dictionary and the signal sparse representation for the alternating
+    optimization algorithm.
+
+    Args:
+        Lu (np.ndarray): Upper Laplacian matrix
+        Ld (np.ndarray): Lower Laplacian matrix
+        s (int): Number of kernels (sub-dictionaries).
+        K (int): Max order of the polynomial for the single sub-dictionary.
+        Y_train (np.ndarray): Training data.
+        K0 (int): Sparsity of the signal representation.
+        dictionary_type (str): Type of dictionary.
+        c (float): Boundary constant from the synthetic data generation process.
+        epsilon (float): Boundary constant from the synthetic data generation process.
+        only (str): Type of initialization. Can be one of: "only_X", "all", "only_D".
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, bool]: Initialized dictionary, initialized sparse representation, and discard flag value.
+    """
 
     n = Lu.shape[0]
     D = np.zeros((n, n*s))
@@ -12,7 +41,7 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
     X = np.tile(X, (s,1))
     discard = 0
 
-    def multiplier_search(*arrays, s=s):
+    def _multiplier_search(*arrays, s=s):
         is_okay = 0
         mult = 100
         tries = 0
@@ -48,18 +77,18 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
         
         if dictionary_type == "joint":
             Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
-            h, discard = multiplier_search(lambda_max_k, lambda_min_k)
+            h, discard = _multiplier_search(lambda_max_k, lambda_min_k)
             D = generate_dictionary(h, s, Lk)
 
         elif dictionary_type == "edge_laplacian":
             Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Ld, K)
-            h, discard = multiplier_search(lambda_max_k, lambda_min_k)
+            h, discard = _multiplier_search(lambda_max_k, lambda_min_k)
             D = generate_dictionary(h, s, Lk)
 
         elif dictionary_type == "separated":
             Luk, lambda_max_u_k, lambda_min_u_k = compute_Lk_and_lambdak(Lu, K, separated=True)
             Ldk, lambda_max_d_k, lambda_min_d_k = compute_Lk_and_lambdak(Ld, K, separated=True)
-            h, discard = multiplier_search(lambda_max_d_k, lambda_min_d_k, lambda_max_u_k, lambda_min_u_k)
+            h, discard = _multiplier_search(lambda_max_d_k, lambda_min_d_k, lambda_max_u_k, lambda_min_u_k)
             D = generate_dictionary(h, s, Luk, Ldk)
     
     if (only == "only_X" or only == "all"):
@@ -80,6 +109,53 @@ def initialize_dic(Lu, Ld, s, K, Y_train, K0, dictionary_type, c, epsilon, only)
     return D, X, discard
 
 
+def topological_dictionary_learn(Y_train: np.ndarray,
+                                 Y_test: np.ndarray, 
+                                 K: int, 
+                                 n: int, 
+                                 s: int,
+                                 D0: np.ndarray, 
+                                 X0: np.ndarray, 
+                                 Lu: np.ndarray, 
+                                 Ld: np.ndarray,
+                                 dictionary_type: str, 
+                                 c: float, 
+                                 epsilon: float, 
+                                 K0: int,
+                                 lambda_: float = 1e-3, 
+                                 max_iter: int = 10, 
+                                 patience: int = 10,
+                                 tol: float = 1e-7, 
+                                 verbose: int = 0) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Dictionary learning algorithm implementation for sparse representations of a signal on complex regular cellular.
+    The algorithm consists of an iterative alternating optimization procedure defined in two steps: the positive semi-definite programming step
+    for obtaining the coefficients and dictionary based on Hodge theory, and the Orthogonal Matching Pursuit step for constructing 
+    the K0-sparse solution from the dictionary found in the previous step, which best approximates the original signal.
+    Args:
+        Y_train (np.ndarray): Training data.
+        Y_test (np.ndarray): Testing data.
+        K (int): Max order of the polynomial for the single sub-dictionary.
+        n (int): Number of data points (number of nodes in the data graph).
+        s (int): Number of kernels (sub-dictionaries).
+        D0 (np.ndarray): Initial dictionary.
+        X0 (np.ndarray): Initial sparse representation.
+        Lu (np.ndarray): Upper Laplacian matrix
+        Ld (np.ndarray): Lower Laplacian matrix
+        dictionary_type (str): Type of dictionary.
+        c (float): Boundary constant from the synthetic data generation process.
+        epsilon (float): Boundary constant from the synthetic data generation process.
+        K0 (int): Sparsity of the signal representation.
+        lambda_ (float, optional): Regularization parameter. Defaults to 1e-3.
+        max_iter (int, optional): Maximum number of iterations. Defaults to 10.
+        patience (int, optional): Patience for early stopping. Defaults to 10.
+        tol (float, optional): Tolerance value. Defaults to 1e-7.
+        verbose (int, optional): Verbosity level. Defaults to 0.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+         minimum training error, minimum testing error, optimal coefficients, optimal testing sparse representation, and optimal training sparse representation.
+    """
 def topological_dictionary_learn(Y_train, Y_test, K, n, s, D0, X0, Lu, Ld, dictionary_type, c, epsilon, K0, lambda_=1e-3, max_iter=10, patience=10, tol=1e-7, verbose=0):
 
     # Define hyperparameters
