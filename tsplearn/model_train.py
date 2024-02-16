@@ -156,7 +156,6 @@ def topological_dictionary_learn(Y_train: np.ndarray,
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
          minimum training error, minimum testing error, optimal coefficients, optimal testing sparse representation, and optimal training sparse representation.
     """
-def topological_dictionary_learn(Y_train, Y_test, K, n, s, D0, X0, Lu, Ld, dictionary_type, c, epsilon, K0, lambda_=1e-3, max_iter=10, patience=10, tol=1e-7, verbose=0):
 
     # Define hyperparameters
     min_error_train_norm, min_error_test_norm = 1e20, 1e20
