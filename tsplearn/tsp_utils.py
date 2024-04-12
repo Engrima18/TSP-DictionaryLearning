@@ -120,7 +120,7 @@ class EnhancedGraph(nx.Graph):
 
         return B2
     
-    def get_laplacians(self, sub_size = None):
+    def get_laplacians(self, sub_size = None, full=False):
         
         B1 = self.get_b1()
         B2 = self.get_b2()
@@ -132,6 +132,10 @@ class EnhancedGraph(nx.Graph):
             
         B2 = B2[:,np.sum(np.abs(B2), 0) == 3]
         nu = B2.shape[1]
+
+        if full:
+            Lu = np.matmul(B2, np.transpose(B2), dtype=float)
+            return Lu
 
         # Create a matrix to mask/color triangles
         prob_T = self.p_triangles # ratio of triangles that we want to retain from the original full topology
