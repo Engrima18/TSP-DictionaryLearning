@@ -7,46 +7,46 @@ from typing import Tuple, Union
 from tqdm import tqdm
 
 
-def compute_Lk_and_lambdak(L: np.ndarray,
-                           K: int, 
+def compute_Lj_and_lambdaj(L: np.ndarray,
+                           J: int, 
                            separated: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Compute powers of L up to K and the maximum and minimum eigenvalues raised to the powers of 1 through K.
+    Compute powers of L up to J and the maximum and minimum eigenvalues raised to the powers of 1 through J.
 
     Parameters:
     - L (np.ndarray): The Laplacian matrix.
-    - K (int): The highest power to compute.
+    - J (int): The highest power to compute.
     - separated (bool, optional): If True, compute separated eigenvalue ranges. Defaults to False.
 
     Returns:
-    - Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing Lk, lambda_max_k, and lambda_min_k.
+    - Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing Lj, lambda_max_k, and lambda_min_k.
     """
 
     lambdas, _ = eigs(L)
     lambdas[np.abs(lambdas) < np.finfo(float).eps] = 0
     lambda_max = np.max(lambdas).real
     lambda_min = np.min(lambdas).real
-    Lk = np.array([la.matrix_power(L, i) for i in range(1, K + 1)])
+    Lj = np.array([la.matrix_power(L, i) for i in range(1, J + 1)])
     # for the "separated" implementation we need a different dimensionality
     if separated:
-        lambda_max_k = lambda_max ** np.arange(1, K + 1)
-        lambda_min_k = lambda_min ** np.arange(1, K + 1)
+        lambda_max_k = lambda_max ** np.arange(1, J + 1)
+        lambda_min_k = lambda_min ** np.arange(1, J + 1)
     else:
-        lambda_max_k = lambda_max ** np.array(list(np.arange(1, K + 1))+[0])
-        lambda_min_k = lambda_min ** np.array(list(np.arange(1, K + 1))+[0])
+        lambda_max_k = lambda_max ** np.array(list(np.arange(1, J + 1))+[0])
+        lambda_min_k = lambda_min ** np.array(list(np.arange(1, J + 1))+[0])
 
-    return Lk, lambda_max_k, lambda_min_k
+    return Lj, lambda_max_k, lambda_min_k
 
 
 def generate_coeffs(*arrays: np.ndarray, 
-                    s: int, 
+                    P: int, 
                     mult: int = 10) -> Tuple[np.ndarray, float, float, float, float]:
     """
     Generate coefficients for synthetic data generation.
 
     Parameters:
     - arrays (np.ndarray): Variable number of arrays specifying eigenvalues.
-    - s (int): Number of samples.
+    - P (int): Number of sub-dictionaries.
     - mult (int, optional): Multiplier for coefficient generation. Defaults to 10.
 
     Returns:
@@ -57,8 +57,8 @@ def generate_coeffs(*arrays: np.ndarray,
     # it means that you are using dictionary_type="separated"
     if len(arrays)==2:
         lambda_max_k, lambda_min_k = arrays
-        K = lambda_max_k.shape[0]
-        h = mult / np.max(lambda_max_k) * np.random.rand(s, K)
+        J = lambda_max_k.shape[0]
+        h = mult / np.max(lambda_max_k) * np.random.rand(P, J)
         # For later sanity check in optimization phase 
         tmp_max_vec = h @ lambda_max_k # parallelize the code with simple matrix multiplications
         tmp_min_vec = h @ lambda_min_k
@@ -72,15 +72,15 @@ def generate_coeffs(*arrays: np.ndarray,
 
     elif len(arrays)==4:
         lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k = arrays
-        K = lambda_max_u_k.shape[0]
-        hI = mult / np.max(lambda_max_d_k) * np.random.rand(s, K)
-        hS = mult / np.max(lambda_max_u_k) * np.random.rand(s, K)
-        hH = mult / np.min([np.max(lambda_max_u_k), np.max(lambda_max_d_k)]) * np.random.rand(s, 1)
+        J = lambda_max_u_k.shape[0]
+        hI = mult / np.max(lambda_max_d_k) * np.random.rand(P, J)
+        hS = mult / np.max(lambda_max_u_k) * np.random.rand(P, J)
+        hH = mult / np.min([np.max(lambda_max_u_k), np.max(lambda_max_d_k)]) * np.random.rand(P, 1)
         h = [hS, hI, hH]
-        tmp_max_vec_S = (hS @ lambda_max_u_k).reshape(s,1)
-        tmp_min_vec_S = (hS @ lambda_min_u_k).reshape(s,1)
-        tmp_max_vec_I = (hI @ lambda_max_d_k).reshape(s,1)
-        tmp_min_vec_I = (hI @ lambda_min_d_k).reshape(s,1)
+        tmp_max_vec_S = (hS @ lambda_max_u_k).reshape(P,1)
+        tmp_min_vec_S = (hS @ lambda_min_u_k).reshape(P,1)
+        tmp_max_vec_I = (hI @ lambda_max_d_k).reshape(P,1)
+        tmp_min_vec_I = (hI @ lambda_min_d_k).reshape(P,1)
         c = np.max(tmp_max_vec_I + tmp_max_vec_S + hH)
         tmp_sum_min = np.sum(tmp_min_vec_I + tmp_min_vec_S + hH)
         tmp_sum_max = np.sum(tmp_max_vec_I + tmp_max_vec_S + hH)
@@ -95,7 +95,7 @@ def generate_coeffs(*arrays: np.ndarray,
 
 
 def generate_dictionary(h: Union[list, np.ndarray], 
-                        s: int, 
+                        P: int, 
                         *matrices: np.ndarray) -> np.ndarray:
     """
     Generate a dictionary matrix as a concatenation of sub-dictionary matrices. Each of the sub-dictionary 
@@ -104,7 +104,7 @@ def generate_dictionary(h: Union[list, np.ndarray],
 
     Parameters:
     - h (np.ndarray): Coefficients for linear combination.
-    - s (int): Number of kernels (number of sub-dictionaries).
+    - P (int): Number of kernels (number of sub-dictionaries).
     - matrices (np.ndarray): Laplacian matrices.
 
     Returns:
@@ -114,24 +114,24 @@ def generate_dictionary(h: Union[list, np.ndarray],
     D = []
     # Check if upper and lower Laplacians are separately provided
     if len(matrices)==1:
-        Lk = matrices[0]
-        n = Lk.shape[-1]
-        k = Lk.shape[0]
+        Lj = matrices[0]
+        M = Lj.shape[-1]
+        J = Lj.shape[0]
 
-        for i in range(0,s):
-            h_tmp = h[i,:-1].reshape(k,1,1)
-            tmp = np.sum(h_tmp*Lk, axis=0) + h[i,-1]*np.eye(n,n)
+        for i in range(0,P):
+            h_tmp = h[i,:-1].reshape(J,1,1)
+            tmp = np.sum(h_tmp*Lj, axis=0) + h[i,-1]*np.eye(M,M)
             D.append(tmp)
     elif len(matrices)==2:
-        Luk , Ldk = matrices
-        n = Luk.shape[-1]
-        k = Luk.shape[0]
+        Luj , Ldj = matrices
+        M = Luj.shape[-1]
+        J = Luj.shape[0]
 
-        for i in range(0,s):
-            hu = h[0][i].reshape(k,1,1)
-            hd = h[1][i].reshape(k,1,1)
+        for i in range(0,P):
+            hu = h[0][i].reshape(J,1,1)
+            hd = h[1][i].reshape(J,1,1)
             hid = h[2][i]
-            tmp = np.sum(hu*Luk + hd*Ldk, axis=0) + hid*np.eye(n,n)
+            tmp = np.sum(hu*Luj + hd*Ldj, axis=0) + hid*np.eye(M,M)
             D.append(tmp)
     else:
         raise ValueError("Function accepts one vector and either 1 or 2 matrices.")
@@ -143,8 +143,8 @@ def create_ground_truth(Lu: np.ndarray,
                         Ld: np.ndarray, 
                         m_train: int, 
                         m_test: int, 
-                        s: int, 
-                        K: int, 
+                        P: int, 
+                        J: int, 
                         K0: int,
                         dictionary_type: str, 
                         sparsity_mode: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
@@ -156,8 +156,8 @@ def create_ground_truth(Lu: np.ndarray,
     - Ld (np.ndarray): Lower Laplacian matrix.
     - m_train (int): Number of training samples.
     - m_test (int): Number of testing samples.
-    - s (int): Number of kernels (sub-dictionaries).
-    - K (int): Maximum power of Laplacian matrices.
+    - P (int): Number of kernels (sub-dictionaries).
+    - J (int): Maximum power of Laplacian matrices.
     - K0 (int): Maximum number of non-zero coefficients.
     - dictionary_type (str): Type of dictionary.
     - sparsity_mode (str): Mode of sparsity.
@@ -168,26 +168,26 @@ def create_ground_truth(Lu: np.ndarray,
     """
     
     if dictionary_type == "joint":
-        Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
-        h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, s=s)
-        D = generate_dictionary(h, s, Lk)
+        Lj, lambda_max_k, lambda_min_k = compute_Lj_and_lambdaj(Lu + Ld, J)
+        h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, P=P)
+        D = generate_dictionary(h, P, Lj)
 
     elif dictionary_type == "edge_laplacian":
-        Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Ld, K)
-        h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, s=s)
-        D = generate_dictionary(h, s, Lk)
+        Lj, lambda_max_k, lambda_min_k = compute_Lj_and_lambdaj(Ld, J)
+        h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, P=P)
+        D = generate_dictionary(h, P, Lj)
 
     elif dictionary_type == "separated":
-        Luk, lambda_max_u_k, lambda_min_u_k = compute_Lk_and_lambdak(Lu, K, separated=True)
-        Ldk, lambda_max_d_k, lambda_min_d_k = compute_Lk_and_lambdak(Ld, K, separated=True)
-        h, c, epsilon, _, _ = generate_coeffs(lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k, s=s)
-        D = generate_dictionary(h, s, Luk, Ldk)
+        Luj, lambda_max_u_k, lambda_min_u_k = compute_Lj_and_lambdaj(Lu, J, separated=True)
+        Ldj, lambda_max_d_k, lambda_min_d_k = compute_Lj_and_lambdaj(Ld, J, separated=True)
+        h, c, epsilon, _, _ = generate_coeffs(lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k, P=P)
+        D = generate_dictionary(h, P, Luj, Ldj)
 
-    n = D.shape[0]
+    M = D.shape[0]
 
     # Signal Generation
-    def _create_column_vec(row,n, s):
-        tmp = np.zeros(n*s)
+    def _create_column_vec(row,M, P):
+        tmp = np.zeros(M*P)
         tmp[row['idxs']]=row['non_zero_coeff']
         return tmp
 
@@ -201,11 +201,11 @@ def create_ground_truth(Lu: np.ndarray,
     # sparsity coefficient for each column
     tmp['K0'] = tmp_K0
     # for each column get K0 indexes
-    tmp['idxs'] = tmp.K0.apply(lambda x: np.random.choice(n*s, x, replace=False))
+    tmp['idxs'] = tmp.K0.apply(lambda x: np.random.choice(M*P, x, replace=False))
     # for each of the K0 row indexes in each column, sample K0 values
     tmp['non_zero_coeff'] = tmp.K0.apply(lambda x: np.random.randn(x))
     # create the column vectors with the desired characteristics
-    tmp['column_vec'] = tmp.apply(lambda x: _create_column_vec(x,n=n, s=s), axis=1)
+    tmp['column_vec'] = tmp.apply(lambda x: _create_column_vec(x,M=M, P=P), axis=1)
     # finally derive the sparse signal representation matrix
     X = np.column_stack(tmp['column_vec'].values)
 
@@ -284,9 +284,9 @@ def verify_dic(D: np.ndarray,
 def generate_data(dictionary_type: str,
                   Lu: np.ndarray,
                   Ld: np.ndarray,
-                  n: int,
-                  s: int,
-                  k: int,
+                  M: int,
+                  P: int,
+                  J: int,
                   n_sim: int,
                   m_test: int,
                   m_train: int,
@@ -295,13 +295,13 @@ def generate_data(dictionary_type: str,
                   sparsity_mode: str = "max",
                   verbose: bool = True):
 
-    D_true = np.zeros((n, n * s, n_sim))
-    Y_train = np.zeros((n, m_train, n_sim))
-    Y_test = np.zeros((n, m_test, n_sim))
+    D_true = np.zeros((M, M * P, n_sim))
+    Y_train = np.zeros((M, m_train, n_sim))
+    Y_test = np.zeros((M, m_test, n_sim))
     epsilon_true = np.zeros(n_sim)
     c_true = np.zeros(n_sim)
-    X_train = np.zeros((n * s, m_train, n_sim))
-    X_test = np.zeros((n * s, m_test, n_sim))
+    X_train = np.zeros((M * P, m_train, n_sim))
+    X_test = np.zeros((M * P, m_test, n_sim))
 
     for sim in range(n_sim):
         best_sparsity = 0
@@ -312,8 +312,8 @@ def generate_data(dictionary_type: str,
                                                                                                                     Ld=Ld,
                                                                                                                     m_train=m_train,
                                                                                                                     m_test=m_test, 
-                                                                                                                    s=s, 
-                                                                                                                    K=k, 
+                                                                                                                    P=P, 
+                                                                                                                    J=J, 
                                                                                                                     K0=K0_max, 
                                                                                                                     dictionary_type=dictionary_type, 
                                                                                                                     sparsity_mode=sparsity_mode
