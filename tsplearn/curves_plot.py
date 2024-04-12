@@ -14,7 +14,7 @@ def plot_error_curves(
     dictionary_type: str
 ) -> plt.Axes:
     """
-    Plot the error curves for Fourier, Edge, Joint, and Separated test errors.
+    Plot the test errors curves for learning algorithms comparing Fourier, Edge, Joint, and Separated dictionary parametrization.
 
     Parameters:
     - min_error_fou_test (pd.DataFrame): DataFrame containing minimum errors for the Fourier test.

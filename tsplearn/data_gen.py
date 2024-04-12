@@ -4,6 +4,7 @@ import pandas as pd
 from scipy.sparse.linalg import eigs
 from sklearn.linear_model import OrthogonalMatchingPursuit
 from typing import Tuple, Union
+from tqdm import tqdm
 
 
 def compute_Lk_and_lambdak(L: np.ndarray,
@@ -49,7 +50,7 @@ def generate_coeffs(*arrays: np.ndarray,
     - mult (int, optional): Multiplier for coefficient generation. Defaults to 10.
 
     Returns:
-    - Tuple[np.ndarray, float, float, float, float]: Coefficients and control variables.
+    - Tuple[Union[list, np.ndarray], float, float, float, float]: Coefficients and control variables.
     """
 
     # if passing four arguments (two for upper and two for lower laplacian eigevals)
@@ -93,7 +94,7 @@ def generate_coeffs(*arrays: np.ndarray,
     return h, c, epsilon, tmp_sum_min, tmp_sum_max
 
 
-def generate_dictionary(h: np.ndarray, 
+def generate_dictionary(h: Union[list, np.ndarray], 
                         s: int, 
                         *matrices: np.ndarray) -> np.ndarray:
     """
@@ -165,7 +166,7 @@ def create_ground_truth(Lu: np.ndarray,
     - Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
       Generated dictionary, coefficients, training and test data, epsilon, and sparse representation of training and test data.
     """
-
+    
     if dictionary_type == "joint":
         Lk, lambda_max_k, lambda_min_k = compute_Lk_and_lambdak(Lu + Ld, K)
         h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, s=s)
@@ -278,3 +279,64 @@ def verify_dic(D: np.ndarray,
             fin_acc=0
     max_possible_sparsity = K0 - 1
     return max_possible_sparsity, fin_acc
+
+
+def generate_data(dictionary_type: str,
+                  Lu: np.ndarray,
+                  Ld: np.ndarray,
+                  n: int,
+                  s: int,
+                  k: int,
+                  n_sim: int,
+                  m_test: int,
+                  m_train: int,
+                  K0_max: int,
+                  n_search: int = 3000,
+                  sparsity_mode: str = "max",
+                  verbose: bool = True):
+
+    D_true = np.zeros((n, n * s, n_sim))
+    Y_train = np.zeros((n, m_train, n_sim))
+    Y_test = np.zeros((n, m_test, n_sim))
+    epsilon_true = np.zeros(n_sim)
+    c_true = np.zeros(n_sim)
+    X_train = np.zeros((n * s, m_train, n_sim))
+    X_test = np.zeros((n * s, m_test, n_sim))
+
+    for sim in range(n_sim):
+        best_sparsity = 0
+
+        for _ in tqdm(range(n_search)):
+            # try:
+            D_try, h, Y_train_try, Y_test_try, epsilon_try, c_try, X_train_try, X_test_try = create_ground_truth(Lu=Lu,
+                                                                                                                    Ld=Ld,
+                                                                                                                    m_train=m_train,
+                                                                                                                    m_test=m_test, 
+                                                                                                                    s=s, 
+                                                                                                                    K=k, 
+                                                                                                                    K0=K0_max, 
+                                                                                                                    dictionary_type=dictionary_type, 
+                                                                                                                    sparsity_mode=sparsity_mode
+                                                                                                                    )
+                                        
+            max_possible_sparsity, _ = verify_dic(D_try, 
+                                                    Y_train_try, 
+                                                    X_train_try, 
+                                                    K0_max, .7)
+            
+            if max_possible_sparsity > best_sparsity:
+                best_sparsity = max_possible_sparsity
+                D_true[:, :, sim] = D_try
+                Y_train[:, :, sim] = Y_train_try
+                Y_test[:, :, sim] = Y_test_try
+                epsilon_true[sim] = epsilon_try
+                c_true[sim] = c_try
+                X_train[:, :, sim] = X_train_try
+                X_test[:, :, sim] = X_test_try
+
+            # except Exception as e:
+            #     print(f"Error during dictionary creation: {e}")
+        if verbose:
+            print(f"...Done! # Best Sparsity: {best_sparsity}")
+
+    return D_true, Y_train, Y_test, X_train, X_test, epsilon_true, c_true
