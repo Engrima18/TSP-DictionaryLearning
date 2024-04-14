@@ -5,16 +5,74 @@ import cvxpy as cp
 from .data_gen import *
 from typing import Tuple
 
-def initialize_dic(Lu: np.ndarray,
-                   Ld: np.ndarray, 
-                   P: int, 
-                   J: int, 
-                   Y_train: np.ndarray, 
-                   K0: int,
-                   dictionary_type: str, 
-                   c: float, 
-                   epsilon: float, 
-                   only: str) -> Tuple[np.ndarray, np.ndarray, bool]:
+
+def sparse_transform(D, K0, Y_test, Y_train=None):
+
+    dd = la.norm(D, axis=0)
+    W = np.diag(1. / dd)
+    Domp = D @ W
+    X_test = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_test)
+    # Normalization
+    X_test = W @ X_test
+
+    # Same for the training set
+    if Y_train != None:
+        X_train = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_train)
+        X_train = W @ X_train
+
+        return X_test, X_train
+    
+    return X_test
+
+
+def nmse(D, X, Y, m):
+    return (1/m)* np.sum(la.norm(Y - (D @ X), axis=0)**2 /la.norm(Y, axis=0)**2)
+
+
+def _multiplier_search(*arrays, P, c, epsilon):
+    is_okay = 0
+    mult = 100
+    tries = 0
+    while is_okay==0:
+        is_okay = 1
+        h, c_try, _, tmp_sum_min, tmp_sum_max = generate_coeffs(arrays, P=P, mult=mult)
+        if c_try <= c:
+            is_okay *= 1
+        if tmp_sum_min > c-epsilon:
+            is_okay *= 1
+            incr_mult = 0
+        else:
+            is_okay = is_okay*0
+            incr_mult = 1
+        if tmp_sum_max < c+epsilon:
+            is_okay *= 1
+            decr_mult = 0
+        else:
+            is_okay *= 0
+            decr_mult = 1
+        if is_okay == 0:
+            tries += 1
+        if tries >3:
+            discard = 1
+            break
+        if incr_mult == 1:
+            mult *= 2
+        if decr_mult == 1:
+            mult /= 2
+    return h, discard
+
+
+def init_dict(Lu: np.ndarray,
+              Ld: np.ndarray, 
+              P: int, 
+              J: int, 
+              Y_train: np.ndarray, 
+              K0: int,
+              dictionary_type: str, 
+              c: float, 
+              epsilon: float,
+              h: np.ndarray = None, 
+              only: str = "only_X") -> Tuple[np.ndarray, np.ndarray]:
     """
     Initialize the dictionary and the signal sparse representation for the alternating
     optimization algorithm.
@@ -39,57 +97,27 @@ def initialize_dic(Lu: np.ndarray,
     D = np.zeros((M, M*P))
     X = np.zeros(Y_train.shape)
     X = np.tile(X, (P,1))
-    discard = 0
-
-    def _multiplier_search(*arrays, P=P):
-        is_okay = 0
-        mult = 100
-        tries = 0
-        while is_okay==0:
-            is_okay = 1
-            h, c_try, _, tmp_sum_min, tmp_sum_max = generate_coeffs(arrays, P=P, mult=mult)
-            if c_try <= c:
-                is_okay *= 1
-            if tmp_sum_min > c-epsilon:
-                is_okay *= 1
-                incr_mult = 0
-            else:
-                is_okay = is_okay*0
-                incr_mult = 1
-            if tmp_sum_max < c+epsilon:
-                is_okay *= 1
-                decr_mult = 0
-            else:
-                is_okay *= 0
-                decr_mult = 1
-            if is_okay == 0:
-                tries += 1
-            if tries >3:
-                discard = 1
-                break
-            if incr_mult == 1:
-                mult *= 2
-            if decr_mult == 1:
-                mult /= 2
-        return h, discard
+    discard = 1
 
     if (only == "only_D") or (only == "all"):
         
-        if dictionary_type == "joint":
-            Lj, lambda_max_j, lambda_min_j = compute_Lj_and_lambdaj(Lu + Ld, J)
-            h, discard = _multiplier_search(lambda_max_j, lambda_min_j)
-            D = generate_dictionary(h, P, Lj)
+        while discard==1:
 
-        elif dictionary_type == "edge_laplacian":
-            Lj, lambda_max_j, lambda_min_j = compute_Lj_and_lambdaj(Ld, J)
-            h, discard = _multiplier_search(lambda_max_j, lambda_min_j)
-            D = generate_dictionary(h, P, Lj)
+            if dictionary_type == "joint":
+                Lj, lambda_max_j, lambda_min_j = compute_Lj_and_lambdaj(Lu + Ld, J)
+                h, discard = _multiplier_search(lambda_max_j, lambda_min_j, P=P, c=c, epsilon=epsilon)
+                D = generate_dictionary(h, P, Lj)
 
-        elif dictionary_type == "separated":
-            Luj, lambda_max_u_j, lambda_min_u_j = compute_Lj_and_lambdaj(Lu, J, separated=True)
-            Ldj, lambda_max_d_j, lambda_min_d_j = compute_Lj_and_lambdaj(Ld, J, separated=True)
-            h, discard = _multiplier_search(lambda_max_d_j, lambda_min_d_j, lambda_max_u_j, lambda_min_u_j)
-            D = generate_dictionary(h, P, Luj, Ldj)
+            elif dictionary_type == "edge_laplacian":
+                Lj, lambda_max_j, lambda_min_j = compute_Lj_and_lambdaj(Ld, J)
+                h, discard = _multiplier_search(lambda_max_j, lambda_min_j, P=P, c=c, epsilon=epsilon)
+                D = generate_dictionary(h, P, Lj)
+
+            elif dictionary_type == "separated":
+                Luj, lambda_max_u_j, lambda_min_u_j = compute_Lj_and_lambdaj(Lu, J, separated=True)
+                Ldj, lambda_max_d_j, lambda_min_d_j = compute_Lj_and_lambdaj(Ld, J, separated=True)
+                h, discard = _multiplier_search(lambda_max_d_j, lambda_min_d_j, lambda_max_u_j, lambda_min_u_j, P=P, c=c, epsilon=epsilon)
+                D = generate_dictionary(h, P, Luj, Ldj)
     
     if (only == "only_X" or only == "all"):
         
@@ -98,15 +126,28 @@ def initialize_dic(Lu: np.ndarray,
         else:
             L = Lu+Ld
 
-        _, Dx = sla.eig(L)
-        dd = la.norm(Dx, axis=0)
-        W = np.diag(1./dd)
-        Dx = Dx / la.norm(Dx)  
-        Domp = Dx@W
-        X = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp.real, x), axis=0, arr=Y_train)
-        X = np.tile(X, (P,1))
+        # If no prior info on the dictionary simply do the Fourier transform
+        if h==None:
+            _, Dx = sla.eig(L)
+            dd = la.norm(Dx, axis=0)
+            W = np.diag(1./dd)
+            Dx = Dx / la.norm(Dx)  
+            Domp = Dx@W
+            X = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp.real, x), axis=0, arr=Y_train)
+            X = np.tile(X, (P,1))
+        # Otherwise use prior info about the dictionary to initialize the sparse representation
+        else:
+            if dictionary_type == "separated":
+                Luj = np.array([la.matrix_power(Lu, i) for i in range(1, J + 1)])
+                Ldj = np.array([la.matrix_power(Ld, i) for i in range(1, J + 1)])
+                D = generate_dictionary(h, P, Luj, Ldj)
+                X = sparse_transform(D, K0, Y_train)
+            else: 
+                Lj = np.array([la.matrix_power(L, i) for i in range(1, J + 1)])
+                D = generate_dictionary(h, P, Lj)
+                X = sparse_transform(D, K0, Y_train)                
         
-    return D, X, discard
+    return D, X
 
 
 def topological_dictionary_learn(Y_train: np.ndarray,
@@ -186,7 +227,7 @@ def topological_dictionary_learn(Y_train: np.ndarray,
             I = cp.Constant(np.eye(M))
             
             # Define the objective function
-            if dictionary_type in ["joint", "edge_laplacian"]:
+            if dictionary_type != "separated":
                 # Init the variables
                 h = cp.Variable((P, J))
                 hI = cp.Variable((P, 1))
@@ -234,6 +275,8 @@ def topological_dictionary_learn(Y_train: np.ndarray,
             D = D.value
 
             # OMP Step
+
+            # X_train,X_test = sparse_transform(D, K0, Y_test, Y_train)
             dd = la.norm(D, axis=0)
             W = np.diag(1. / dd)
             Domp = D @ W
@@ -286,4 +329,6 @@ def topological_dictionary_learn(Y_train: np.ndarray,
                                 la.norm(Y_test, axis=0)**2)
         h_opt = 0
         
-    return min_error_train, min_error_test, h_opt, X_opt_test, X_opt_train
+    return min_error_train, min_error_test, h_opt, X_opt_test, X_opt_train, D_opt, Ldj, hist
+
+
