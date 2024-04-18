@@ -257,7 +257,6 @@ def verify_dic(D: np.ndarray,
         Tuple[int, float]: Maximum possible sparsity and final accuracy.
     """
 
-    # OMP
     dd = la.norm(D, axis=0)
     W = np.diag(1. / dd)  
     Domp = D @ W
@@ -307,35 +306,36 @@ def generate_data(dictionary_type: str,
         best_sparsity = 0
 
         for _ in tqdm(range(n_search)):
-            # try:
-            D_try, h, Y_train_try, Y_test_try, epsilon_try, c_try, X_train_try, X_test_try = create_ground_truth(Lu=Lu,
-                                                                                                                    Ld=Ld,
-                                                                                                                    m_train=m_train,
-                                                                                                                    m_test=m_test, 
-                                                                                                                    P=P, 
-                                                                                                                    J=J, 
-                                                                                                                    K0=K0_max, 
-                                                                                                                    dictionary_type=dictionary_type, 
-                                                                                                                    sparsity_mode=sparsity_mode
-                                                                                                                    )
-                                        
-            max_possible_sparsity, _ = verify_dic(D_try, 
-                                                    Y_train_try, 
-                                                    X_train_try, 
-                                                    K0_max, .7)
-            
-            if max_possible_sparsity > best_sparsity:
-                best_sparsity = max_possible_sparsity
-                D_true[:, :, sim] = D_try
-                Y_train[:, :, sim] = Y_train_try
-                Y_test[:, :, sim] = Y_test_try
-                epsilon_true[sim] = epsilon_try
-                c_true[sim] = c_try
-                X_train[:, :, sim] = X_train_try
-                X_test[:, :, sim] = X_test_try
+            try:
+                D_try, h, Y_train_try, Y_test_try, epsilon_try, c_try, X_train_try, X_test_try = create_ground_truth(Lu=Lu,
+                                                                                                                        Ld=Ld,
+                                                                                                                        m_train=m_train,
+                                                                                                                        m_test=m_test, 
+                                                                                                                        P=P, 
+                                                                                                                        J=J, 
+                                                                                                                        K0=K0_max, 
+                                                                                                                        dictionary_type=dictionary_type, 
+                                                                                                                        sparsity_mode=sparsity_mode
+                                                                                                                        )
+                                            
+                max_possible_sparsity, _ = verify_dic(D_try, 
+                                                        Y_train_try, 
+                                                        X_train_try, 
+                                                        K0_max, .7)
+                
+                if max_possible_sparsity > best_sparsity:
+                    best_sparsity = max_possible_sparsity
+                    D_true[:, :, sim] = D_try
+                    Y_train[:, :, sim] = Y_train_try
+                    Y_test[:, :, sim] = Y_test_try
+                    epsilon_true[sim] = epsilon_try
+                    c_true[sim] = c_try
+                    X_train[:, :, sim] = X_train_try
+                    X_test[:, :, sim] = X_test_try
 
-            # except Exception as e:
-            #     print(f"Error during dictionary creation: {e}")
+            except Exception as e:
+                print(f"Error during dictionary creation: {e}")
+
         if verbose:
             print(f"...Done! # Best Sparsity: {best_sparsity}")
 
