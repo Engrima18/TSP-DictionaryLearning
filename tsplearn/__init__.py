@@ -1,12 +1,12 @@
-from .data_gen import generate_data
-from .model_train import init_dict, topological_dictionary_learn
-from .tsp_utils import EnhancedGraph
-from .curves_plot import plot_error_curves
+from .tsp_generation import generate_data
+from .TspSolver import TspSolver
+from .EnhancedGraph import EnhancedGraph
+from .tsp_plot import plot_error_curves, plot_changepoints_curve
 
 __all__ = [
     'generate_data', 
-    'init_dict', 
-    'topological_dictionary_learn',
+    'TspSolver', 
     'plot_error_curves', 
-    'EnhancedGraph'
+    'EnhancedGraph',
+    'plot_changepoints_curve'
 ]
