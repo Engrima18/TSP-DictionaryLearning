@@ -59,7 +59,7 @@ class EnhancedGraph(nx.Graph):
         super().__init__(*args, **kwargs)
         self.id = f'{seed}_{n}_{p_edges}'
         self.p_triangles = p_triangles
-        er_graph = nx.erdos_renyi_graph(n, p_edges, seed)
+        er_graph = nx.erdos_renyi_graph(n, p_edges, seed=seed)
         self.add_nodes_from(er_graph.nodes(data=True))
         self.add_edges_from(er_graph.edges(data=True))
 
