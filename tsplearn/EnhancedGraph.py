@@ -21,7 +21,7 @@ class EnhancedGraph(nx.Graph):
         er_graph = nx.erdos_renyi_graph(n, p_edges, seed=seed)
         self.add_nodes_from(er_graph.nodes(data=True))
         self.add_edges_from(er_graph.edges(data=True))
-
+        self.seed = seed
         self.adjacency = nx.adjacency_matrix(self).todense()
 
     @memoize()
@@ -99,6 +99,7 @@ class EnhancedGraph(nx.Graph):
         # Create a matrix to mask/color triangles
         prob_T = self.p_triangles # ratio of triangles that we want to retain from the original full topology
         T = int(np.ceil(nu*(1-prob_T)))
+        np.random.seed(self.seed)
         mask = np.random.randint(0, nu, size=T)
         I_T = np.ones(nu)
         I_T[mask] = 0
