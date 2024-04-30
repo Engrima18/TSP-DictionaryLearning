@@ -59,6 +59,7 @@ def plot_changepoints_curve(history,
                             k0, 
                             nu, 
                             T, 
+                            mode,
                             burn_in: float = 0, 
                             a=0.1, 
                             b=0.1, 
@@ -102,10 +103,11 @@ def plot_changepoints_curve(history,
 
     my_plt = sns.lineplot(x=plt_data['x'],y=plt_data['y'], estimator=None, sort=False)
 
+    labels = ("removing", "Optimistic") if mode=="optimistic" else ("adding", "Pessimistic")
     # Change-points
     sns.scatterplot(x=np.hstack([change_points, change_points]),
                     y=np.hstack([change_points_y1, change_points_y2]),
-                    label='Change Points: optimally removing \n a triangle from Upper Laplacian.',
+                    label=f'Change Points: optimally {labels[0]} \n a triangle from Upper Laplacian.',
                     color='purple', marker='d')
 
     plt.vlines(x=change_points, color='lightblue', linestyle='dotted', 
@@ -119,7 +121,7 @@ def plot_changepoints_curve(history,
         x0, xmax = plt.xlim()
         x0 = burn_in_iter
     y0, ymax = plt.ylim()
-    my_plt.set_title(f'Optimistic topology learning',fontsize=16, pad=25)
+    my_plt.set_title(f'{labels[1]} topology learning',fontsize=16, pad=25)
     plt.suptitle(f'Assumed signal sparsity: {k0}  -  Step size h: {step_h}  -  Step size X: {step_x}', fontsize=12, color='gray', x=0.5, y=0.92)
     plt.text(y=ymax*a, x=xmax*b, s=f'Burn-in: {burn_in_iter} iters.', fontsize=15, color='gray')
     plt.text(s=f' Number of inferred triangles: {nu - change_points.shape[0]} \n Number of true triangles: {nu-T}',
