@@ -80,7 +80,7 @@ def generate_coeffs(*arrays: np.ndarray,
         hI = mult / np.max(lambda_max_d_k) * np.random.rand(P, J)
         hS = mult / np.max(lambda_max_u_k) * np.random.rand(P, J)
         hH = mult / np.min([np.max(lambda_max_u_k), np.max(lambda_max_d_k)]) * np.random.rand(P, 1)
-        h = [hS, hI, hH]
+        h = [hH, hS, hI]
         tmp_max_vec_S = (hS @ lambda_max_u_k).reshape(P,1)
         tmp_min_vec_S = (hS @ lambda_min_u_k).reshape(P,1)
         tmp_max_vec_I = (hI @ lambda_max_d_k).reshape(P,1)
@@ -132,9 +132,9 @@ def generate_dictionary(h: Union[list, np.ndarray],
         J = Luj.shape[0]
 
         for i in range(0,P):
-            hu = h[0][i].reshape(J,1,1)
-            hd = h[1][i].reshape(J,1,1)
-            hid = h[2][i]
+            hu = h[1][i].reshape(J,1,1)
+            hd = h[2][i].reshape(J,1,1)
+            hid = h[0][i]
             tmp = np.sum(hu*Luj + hd*Ldj, axis=0) + hid*np.eye(M,M)
             D.append(tmp)
     else:

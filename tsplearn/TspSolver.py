@@ -104,7 +104,7 @@ class TspSolver:
         self.Lu: np.ndarray = Lu
         self.Ld: np.ndarray = Ld
         self.L: np.ndarray = L
-        self.Lu_full: np.ndarray = G.get_laplacians(sub_size=params['sub_size'], 
+        self.Lu_full: np.ndarray = self.G.get_laplacians(sub_size=params['sub_size'], 
                                                     full=True)
         self.M =  L.shape[0]
         self.history: List[np.ndarray] = []

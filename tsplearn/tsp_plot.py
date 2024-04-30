@@ -55,9 +55,20 @@ def plot_error_curves(
     return my_plt
 
 
-def plot_changepoints_curve(history, k0, nu, T, burn_in: float = 0):
+def plot_changepoints_curve(history, 
+                            k0, 
+                            nu, 
+                            T, 
+                            burn_in: float = 0, 
+                            a=0.1, 
+                            b=0.1, 
+                            c=0.7, 
+                            d=0.7,
+                            sparse_plot=False,
+                            include_burn_in=False,
+                            step_h=1.,
+                            step_x=1.):
 
-    warnings.filterwarnings('ignore')
     start_iter = 0
     end_iter = 0
     change_points = []
@@ -84,9 +95,11 @@ def plot_changepoints_curve(history, k0, nu, T, burn_in: float = 0):
     change_points = np.array(change_points[:-1])
     change_points_y1 = np.array(change_points_y1[:-1])
     change_points_y2 = np.array(change_points_y2[1:])
+    # change_points_y = plt_data[plt_data['x'].isin(change_points)].y.to_numpy()[np.arange(0, len(change_points), 1)]
 
     plt.figure(figsize=(14, 6))
     sns.set_style("whitegrid", {"grid.color": ".6", "grid.linestyle": ":"})
+
     my_plt = sns.lineplot(x=plt_data['x'],y=plt_data['y'], estimator=None, sort=False)
 
     # Change-points
@@ -100,19 +113,26 @@ def plot_changepoints_curve(history, k0, nu, T, burn_in: float = 0):
 
     # Burn-in area
     plt.axvspan(0, burn_in_iter, color='grey', alpha=0.2, hatch='//')
-    x0, xmax = plt.xlim()
+    if include_burn_in:
+        x0, xmax = plt.xlim()
+    else:
+        x0, xmax = plt.xlim()
+        x0 = burn_in_iter
     y0, ymax = plt.ylim()
     my_plt.set_title(f'Optimistic topology learning',fontsize=16, pad=25)
-    plt.suptitle(f'Assumed signal sparsity: {k0}', fontsize=12, color='gray', x=0.5, y=0.92)
-    plt.text(y=ymax*0.7, x=xmax*0.1, s=f'Burn-in: {burn_in_iter} iters.', fontsize=9, color='gray')
+    plt.suptitle(f'Assumed signal sparsity: {k0}  -  Step size h: {step_h}  -  Step size X: {step_x}', fontsize=12, color='gray', x=0.5, y=0.92)
+    plt.text(y=ymax*a, x=xmax*b, s=f'Burn-in: {burn_in_iter} iters.', fontsize=15, color='gray')
     plt.text(s=f' Number of inferred triangles: {nu - change_points.shape[0]} \n Number of true triangles: {nu-T}',
-            y=ymax*0.9, x=xmax*0.75, fontsize=12, color='purple')
+            y=ymax*c, x=xmax*d, fontsize=12, color='purple')
     my_plt.set_xlabel('Iteration')
-    my_plt.set_ylabel('Error (log scale)')
-    plt.xticks(change_points)
-    plt.yticks([])
-    plt.xlim(left=0)
+    my_plt.set_ylabel('Error')
+    if sparse_plot:
+        tmp_vector = np.ones(len(change_points))
+        tmp_vector[1::2] = 0
+        plt.xticks(change_points*tmp_vector)
+    else:
+        plt.xticks(change_points)
+    plt.xlim(left=x0)
     plt.yscale('log')
+    plt.yticks([])
     plt.show() 
-
-    return my_plt

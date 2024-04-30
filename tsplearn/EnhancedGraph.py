@@ -22,7 +22,11 @@ class EnhancedGraph(nx.Graph):
         self.add_nodes_from(er_graph.nodes(data=True))
         self.add_edges_from(er_graph.edges(data=True))
         self.seed = seed
-        self.adjacency = nx.adjacency_matrix(self).todense()
+        self.mask = None
+
+    @memoize()
+    def get_adjacency(self):
+        return nx.adjacency_matrix(self).todense()
 
     @memoize()
     def get_b1(self):
@@ -36,7 +40,7 @@ class EnhancedGraph(nx.Graph):
         Find all cycles in the graph within a specified maximum length.
         '''
 
-        A = self.adjacency
+        A = self.get_adjacency()
         G = nx.DiGraph(A)
         cycles = nx.simple_cycles(G)
 
@@ -100,7 +104,7 @@ class EnhancedGraph(nx.Graph):
         prob_T = self.p_triangles # ratio of triangles that we want to retain from the original full topology
         T = int(np.ceil(nu*(1-prob_T)))
         np.random.seed(self.seed)
-        mask = np.random.randint(0, nu, size=T)
+        mask = np.random.choice(np.arange(nu), size=T, replace=False)
         I_T = np.ones(nu)
         I_T[mask] = 0
         I_T = np.diag(I_T)
@@ -109,5 +113,5 @@ class EnhancedGraph(nx.Graph):
         Ld = np.matmul(np.transpose(B1), B1, dtype=float)
         Lu = B2@I_T@B2.T
         L = Lu+Ld
-
+        self.mask = I_T
         return Lu, Ld, L
