@@ -1,6 +1,8 @@
 from typing import List, Tuple
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import seaborn as sns
+import networkx as nx
 import pandas as pd
 import numpy as np
 import warnings
@@ -138,3 +140,43 @@ def plot_changepoints_curve(history,
     plt.yscale('log')
     plt.yticks([])
     plt.show() 
+
+
+def plot_learnt_topology(G_true, B2_true, topology1, topology2, sub_size):
+    
+    fig, axs = plt.subplots(1, 3, figsize=(12, 6))
+    incidence_mat = [B2_true, topology1.B2, topology2.B2]
+    titles = ["True topology", "Inferred topology (pessimistic method)", "Inferred topology (optimistic method)"]
+    i=0
+    
+    for ax, title in zip(axs, titles):
+        A = G_true.get_adjacency()
+        tmp_G = nx.from_numpy_array(A)
+        pos = nx.kamada_kawai_layout(tmp_G)
+        nx.draw(tmp_G, pos, with_labels=False, node_color='purple', node_size=15, ax=ax)
+        num_triangles=0
+        
+        for triangle_index in range(B2_true.shape[1]):
+            np.random.seed(triangle_index)
+            color = np.random.rand(3)
+            triangle_vertices=[]
+            
+            for edge_index, edge in enumerate(tmp_G.edges):
+                if edge_index < sub_size:
+                    if incidence_mat[i][edge_index, triangle_index] != 0:
+                        pos1 = tuple(pos[edge[0]])
+                        pos2 = tuple(pos[edge[1]])
+                        if pos1 not in triangle_vertices:
+                            triangle_vertices.append(pos1)
+                        if pos2 not in triangle_vertices:
+                            triangle_vertices.append(pos2)                
+            if triangle_vertices!= []:
+                num_triangles += 1
+                triangle_patch = Polygon(triangle_vertices, closed=True, facecolor=color, edgecolor='black', alpha=0.3)
+                ax.add_patch(triangle_patch)
+        i+=1
+
+        ax.set_title(title)
+        ax.text(0.5, -0, "Number of triangles: {}".format(num_triangles), ha='center', transform=ax.transAxes)
+    plt.tight_layout()
+    plt.show()
