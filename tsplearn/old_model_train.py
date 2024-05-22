@@ -2,7 +2,7 @@ import scipy.linalg as sla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
-from .data_gen import *
+from .tsp_generation import *
 from typing import Tuple
 
 

@@ -37,7 +37,7 @@ def plot_error_curves(
     n_sim = min_error_fou_test.shape[0]
 
     for d in dict_types.items():
-        for _ in range(n_sim):
+        for sim in range(n_sim):
             tmp_df = pd.DataFrame()   
             tmp_df["Error"] = eval(f'min_error_{d[0]}_test[sim,:]')
             tmp_df["Sparsity"] = k0_coll
@@ -117,26 +117,31 @@ def plot_changepoints_curve(history,
 
     # Burn-in area
     plt.axvspan(0, burn_in_iter, color='grey', alpha=0.2, hatch='//')
+
     if include_burn_in:
         x0, xmax = plt.xlim()
     else:
         x0, xmax = plt.xlim()
         x0 = burn_in_iter
+
     y0, ymax = plt.ylim()
+
     my_plt.set_title(f'{labels[1]} topology learning',fontsize=16, pad=25)
     plt.suptitle(f'Assumed signal sparsity: {k0}  -  Step size h: {step_h}  -  Step size X: {step_x}', fontsize=12, color='gray', x=0.5, y=0.92)
     plt.text(y=ymax*a, x=xmax*b, s=f'Burn-in: {burn_in_iter} iters.', fontsize=15, color='gray')
     plt.text(s=f' Number of inferred triangles: {nu - change_points.shape[0]} \n Number of true triangles: {nu-T}',
             y=ymax*c, x=xmax*d, fontsize=12, color='purple')
     my_plt.set_xlabel('Iteration')
-    my_plt.set_ylabel('Error')
+    my_plt.set_ylabel('Log-Error')
+    
     if sparse_plot:
         tmp_vector = np.ones(len(change_points))
         tmp_vector[1::2] = 0
         plt.xticks(change_points*tmp_vector)
     else:
-        plt.xticks(change_points)
-    plt.xlim(left=x0)
+        if change_points.shape[0]>1:
+            plt.xticks(change_points)
+    plt.xlim(left=x0, right=xmax)
     plt.yscale('log')
     plt.yticks([])
     plt.show() 
@@ -144,7 +149,7 @@ def plot_changepoints_curve(history,
 
 def plot_learnt_topology(G_true, B2_true, topology1, topology2, sub_size):
     
-    fig, axs = plt.subplots(1, 3, figsize=(12, 6))
+    fig, axs = plt.subplots(1, 3, figsize=(16, 6))
     incidence_mat = [B2_true, topology1.B2, topology2.B2]
     titles = ["True topology", "Inferred topology (pessimistic method)", "Inferred topology (optimistic method)"]
     i=0
@@ -180,3 +185,48 @@ def plot_learnt_topology(G_true, B2_true, topology1, topology2, sub_size):
         ax.text(0.5, -0, "Number of triangles: {}".format(num_triangles), ha='center', transform=ax.transAxes)
     plt.tight_layout()
     plt.show()
+
+
+def plot_algo_errors(errors: dict[str, np.ndarray], k0_coll: np.ndarray) -> plt.Axes:
+    """
+    Plot the algorithm errors against the sparsity levels, comparing different implementations
+    of algorithms for learning representations of topological signals:
+    - Semi-definite Programming dictionary and sparse representation joint learning (SDP);
+    - Quadratic Programming dictionary and sparse representation joint learning (QP);
+    - Quadratic Programming dictionary, sparse representation and topology (upper laplacian) joint learning (QP COMPLETE).
+
+    All of the above methods in this case are considered in the "Separated Hodge" laplacian parametrization setup.
+
+    Parameters:
+    errors (dict[str, np.ndarray]): A dictionary containing error matrices for different algorithms.
+                                    The keys are algorithm names, and the values are 2D numpy arrays
+                                    where each row represents the errors for a single simulation.
+    k0_coll (np.ndarray): An array of sparsity levels.
+
+    Returns:
+    plt.Axes: The axes object with the plotted data.
+    """
+    dict_types = {"qp": "QP", "sdp": "SDP", "qp_comp": "QP COMPLETE"}
+
+    res_df = pd.DataFrame()
+    n_sim = errors['qp'].shape[0]
+
+    for algorithm, error_matrix in errors.items():
+        for sim in range(n_sim):
+            tmp_df = pd.DataFrame()
+            tmp_df["Error"] = error_matrix[sim, :]
+            tmp_df["Sparsity"] = k0_coll
+            tmp_df["Algorithm"] = dict_types[algorithm]
+            res_df = pd.concat([res_df, tmp_df])
+
+    plt.figure(figsize=(10, 6))
+    sns.set_style('whitegrid')
+    my_plt = sns.lineplot(data=res_df, x='Sparsity', y='Error', hue='Algorithm',
+                          palette=sns.color_palette("husl"),
+                          markers=['>', '^', 'v'], dashes=False, style='Algorithm')
+    my_plt.set(yscale='log')
+    my_plt.set_title('Topology learning: algorithms comparison')
+    my_plt.set_ylabel('Error (log scale)')
+    plt.show()
+
+    return my_plt

@@ -1,12 +1,17 @@
 from .tsp_generation import generate_data
 from .TspSolver import TspSolver
 from .EnhancedGraph import EnhancedGraph
-from .tsp_plot import plot_error_curves, plot_changepoints_curve
+from .tsp_simulation import *
+from .tsp_plot import *
 
 __all__ = [
-    'generate_data', 
-    'TspSolver', 
-    'plot_error_curves', 
+    'generate_data',
+    'TspSolver',
     'EnhancedGraph',
-    'plot_changepoints_curve'
+    'plot_error_curves',
+    'plot_changepoints_curve',
+    'plot_algo_errors',
+    'plot_learnt_topology',
+    'simulate_dict_param_learning',
+    'simulate_top_learning'
 ]

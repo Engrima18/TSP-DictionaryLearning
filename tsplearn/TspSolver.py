@@ -2,12 +2,11 @@ import scipy.linalg as sla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
-from .tsp_generation import *
-from .EnhancedGraph import EnhancedGraph
+from tsplearn.tsp_generation import *
 from typing import Tuple, List, Union, Dict
-import os
 import pickle
 from functools import wraps
+
 
 def _indicator_matrix(row):
     tmp = row.sigma.copy()
@@ -24,6 +23,13 @@ def _compute_Luj(row, b2, J):
     Luj = np.array([la.matrix_power(Lu, i) for i in range(1, J + 1)])
     return Luj
 
+def _split_coeffs(h ,s ,k):
+    h_tmp = h.value.flatten()
+    hH = h_tmp[np.arange(0, (s*(2*k+1)), (2*k+1))].reshape((s,1))
+    hS = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(2*k+1)), (2*k+1))])].reshape((s,k))
+    hI = h_tmp[np.hstack([[i,i+1] for i in range((k+1), (s*(2*k+1)), (2*k+1))])].reshape((s,k))
+    return [hH, hS, hI]
+    
 def sparse_transform(D, K0, Y_te, Y_tr=None):
 
     dd = la.norm(D, axis=0)
@@ -42,6 +48,22 @@ def sparse_transform(D, K0, Y_te, Y_tr=None):
     X_tr = W @ X_tr
     
     return X_te, X_tr
+
+
+def compute_vandermonde(L, k):
+    
+    def polynomial_exp(x, k):
+        x = x** np.arange(0, k + 1)
+        return x
+
+    eigenvalues, _ = sla.eig(L)
+    idx = eigenvalues.argsort()
+    tmp_df = pd.DataFrame({'Eigs': eigenvalues[idx]})
+    tmp_df['Poly'] = tmp_df['Eigs'].apply(lambda x:  polynomial_exp(x,k))
+    B = np.vstack(tmp_df['Poly'].to_numpy())
+
+    return B
+
 
 def nmse(D, X, Y, m):
     return (1/m)* np.sum(la.norm(Y - (D @ X), axis=0)**2 /la.norm(Y, axis=0)**2)
@@ -104,7 +126,7 @@ class TspSolver:
         self.Lu: np.ndarray = Lu
         self.Ld: np.ndarray = Ld
         self.L: np.ndarray = L
-        self.Lu_full: np.ndarray = self.G.get_laplacians(sub_size=params['sub_size'], 
+        self.Lu_full: np.ndarray = G.get_laplacians(sub_size=params['sub_size'], 
                                                     full=True)
         self.M =  L.shape[0]
         self.history: List[np.ndarray] = []
@@ -122,7 +144,7 @@ class TspSolver:
             hs = np.zeros((self.P,self.J))
             hi = np.zeros((self.P,self.J))
             hh = np.zeros((self.P,1))
-            self.h_opt: List[np.ndarray] = [hs,hi,hh]
+            self.h_opt: List[np.ndarray] = [hh,hs,hi]
         else:
             self.h_opt: np.ndarray = np.zeros((self.P*(self.J+1),1))
             
@@ -131,11 +153,18 @@ class TspSolver:
 
         if self.dictionary_type == "joint":
             self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(self.L, self.J)
+            self.B = compute_vandermonde(self.L, self.J).real
         elif self.dictionary_type == "edge_laplacian":
             self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(self.Ld, self.J)
+            self.B = compute_vandermonde(self.Ld, self.J).real
         elif  self.dictionary_type == 'separated':
             self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(self.Lu, self.J, separated=True)
             self.Ldj, self.lambda_max_d_j, self.lambda_min_d_j = compute_Lj_and_lambdaj(self.Ld, self.J, separated=True)
+            self.Bu = compute_vandermonde(self.Lu, self.J).real
+            self.Bd = compute_vandermonde(self.Ld, self.J)[:, 1:].real
+            self.B = np.hstack([self.Bu, self.Bd])
+
+        self.P_aux: np.ndarray = None
 
         # Init the learning errors
         self.min_error_train = 1e20
@@ -150,6 +179,8 @@ class TspSolver:
         self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(self.Lu, 
                                                                                     self.J, 
                                                                                     separated=True)
+        self.Bu = compute_vandermonde(self.Lu, self.J).real
+        self.B = np.hstack([self.Bu, self.Bd])
 
     @staticmethod
     def _multiplier_search(*arrays, P, c, epsilon):
@@ -216,7 +247,7 @@ class TspSolver:
                 while discard==1:
 
                     if dictionary_type != "separated":
-                        h_prior, discard = _multiplier_search(self.lambda_max_j, 
+                        h_prior, discard = self._multiplier_search(self.lambda_max_j, 
                                                               self.lambda_min_j, 
                                                               P=self.P, 
                                                               c=self.c, 
@@ -226,7 +257,7 @@ class TspSolver:
                                                          self.Lj)
 
                     else:
-                        h_prior, discard = _multiplier_search(self.lambda_max_d_j, 
+                        h_prior, discard = self._multiplier_search(self.lambda_max_d_j, 
                                                               self.lambda_min_d_j, 
                                                               self.lambda_max_u_j, 
                                                               self.lambda_min_u_j,
@@ -411,7 +442,7 @@ class TspSolver:
                     hI = cp.Variable((self.P, self.J))
                     hS = cp.Variable((self.P, self.J))
                     hH = cp.Variable((self.P, 1))
-                    hS.value, hI.value, hH.value = h_opt
+                    hH.value, hS.value, hI.value = h_opt ##################### OCCHIO
                     for i in range(0,self.P):
                         tmp =  cp.Constant(np.zeros((self.M, self.M)))
                         for j in range(0,self.J):
@@ -440,9 +471,9 @@ class TspSolver:
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
                     h_opt = h_opt + step_h*(h.value - h_opt)
                 else:
-                    h_opt = [h_opt[0] + step_h*(hS.value-h_opt[0]), 
-                             h_opt[1] + step_h*(hI.value-h_opt[1]), 
-                             h_opt[2] + step_h*(hH.value-h_opt[2])]
+                    h_opt = [h_opt[0] + step_h*(hH.value-h_opt[0]),
+                             h_opt[1] + step_h*(hS.value-h_opt[1]), 
+                             h_opt[2] + step_h*(hI.value-h_opt[2])]
 
                 # OMP Step
                 X_te_tmp, X_tr_tmp = sparse_transform(D, self.K0, self.Y_test, self.Y_train)
@@ -487,6 +518,141 @@ class TspSolver:
             
         return self.min_error_test, self.min_error_train, hist
     
+
+    def _aux_matrix_update(self, X):
+
+        I = [np.eye(self.M)]
+        LLu = [lu for lu in self.Luj]
+        LLd = [ld for ld in self.Ldj]
+        LL = np.array(I+LLu+LLd)
+        self.P_aux = np.array([LL@X[(i*self.M): ((i+1)*self.M), :] for i in range(self.P)])
+    
+    def topological_dictionary_learn_qp(self,
+                                        lambda_: float = 1e-3, 
+                                        max_iter: int = 10, 
+                                        patience: int = 10,
+                                        tol: float = 1e-7,
+                                        step_h: float = 1.,
+                                        step_x: float = 1.,
+                                        verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+        
+        # Define hyperparameters
+        iter_, pat_iter = 1, 0
+        hist = []
+
+        if self.dictionary_type != "fourier":
+        
+            # Init the the sparse representation
+            h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1,1)
+            Y = cp.Constant(self.Y_train)
+            X_tr = self.X_opt_train
+            X_te = self.X_opt_test
+            # I = np.eye(self.M)
+            I_2 = cp.Constant(np.eye(self.P*(2*self.J+1)))
+            I_s = cp.Constant(np.eye(self.P))
+            i_s = cp.Constant(np.ones((self.P,1)))
+            B = cp.Constant(self.B)
+
+            while pat_iter < patience and iter_ <= max_iter:
+
+                # Init variables and parameters
+                self._aux_matrix_update(X_tr)
+                h = cp.Variable((self.P*(2*self.J+1), 1))
+                # h.value = h_opt
+
+                # P_transposed = self.P_aux.transpose(2, 3, 0, 1)
+                # l = cp.Constant(np.einsum('mn,mnij->ij', Y, P_transposed).reshape(-1))
+                # P_reshaped = self.P_aux.reshape(self.P*(2*self.J+1), -1)
+                # Q = np.dot(P_reshaped, P_reshaped.T)
+
+                l = cp.Constant(np.zeros((self.P*(2*self.J+1), 1)))
+                Q = cp.Constant(np.zeros((self.P*(2*self.J+1), self.P*(2*self.J+1))))
+
+                for i in range(self.M):
+                    for j in range(self.m_train):
+                        Pij = cp.Constant(self.P_aux[:,:,i,j].flatten().reshape(-1,1))
+                        l = l + (Y[i,j]*Pij.T)
+                        Q = Q + Pij@Pij.T
+
+                Q = Q + cp.multiply(lambda_, I_2)
+
+                # Quadratic term
+                term2 = cp.quad_form(h, Q, assume_PSD = True)
+                # Linear term
+                term1 = l@h
+                term1 = cp.multiply(-2, term1)[0]
+                
+                obj = cp.Minimize(term2+term1)
+
+                # Define the constraints
+                cons1 = cp.kron(I_s, B)@h
+                cons2 = cp.kron(i_s.T, B)@h
+                constraints = [cons1 >= 0] + \
+                                [cons1 <= self.c] + \
+                                [cons2 >= (self.c - self.epsilon)] + \
+                                [cons2 <= (self.c + self.epsilon)]
+
+                prob = cp.Problem(obj, constraints)
+                prob.solve(solver=cp.MOSEK, verbose=True)
+
+                # Update the dictionary
+                D_coll = []
+
+                if self.dictionary_type in ["joint", "edge_laplacian"]:
+                    h_opt = h_opt + step_h*(h.value - h_opt)
+                else:
+
+                    h_list = _split_coeffs(h, self.P, self.J)
+                    D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)
+
+                    # for i in range(0, self.P):
+                    #     hu = hS[i].reshape(self.J,1,1)
+                    #     hd = hI[i].reshape(self.J,1,1)
+                    #     hid = hH[i]
+                    #     tmp = np.sum(hu*self.Luj + hd*self.Ldj, axis=0) + hid*I
+                    #     D_coll.append(tmp)
+                                
+                    # h_opt = h_opt + step_h*(h.value - h_opt)
+
+                    # D = np.hstack(tuple(D_coll))
+
+
+                # OMP Step
+                X_te_tmp, X_tr_tmp = sparse_transform(D, self.K0, self.Y_test, self.Y_train)
+                # Sparse Representation Update
+                X_tr = X_tr + step_x*(X_tr_tmp - X_tr)
+                X_te = X_te + step_x*(X_te_tmp - X_te)
+
+                # Error Update
+                error_train = nmse(D, X_tr, self.Y_train, self.m_train)
+                error_test = nmse(D, X_te, self.Y_test, self.m_test)
+
+                hist.append(error_test)
+                
+                # Error Storing
+                if (error_train < self.min_error_train) and (abs(error_train) > np.finfo(float).eps) and (abs(error_train - self.min_error_train) > tol):
+                    self.X_opt_train = X_tr
+                    self.min_error_train = error_train
+
+                if (error_test < self.min_error_test) and (abs(error_test) > np.finfo(float).eps) and (abs(error_test - self.min_error_test) > tol):
+                    self.h_opt = h_list if self.dictionary_type == 'separated' else h_opt
+                    self.D_opt = D
+                    self.X_opt_test = X_te
+                    self.min_error_test = error_test
+                    pat_iter = 0
+
+                    if verbose == 1:
+                        print("New Best Test Error:", self.min_error_test)
+                else:
+                    pat_iter += 1
+
+                iter_ += 1
+        
+        else:
+            pass
+
+        return self.min_error_test, self.min_error_train, hist
+    
     @save_results
     def learn_upper_laplacian(self,
                               Lu_new: np.ndarray = None,
@@ -499,7 +665,8 @@ class TspSolver:
                               step_h: float = 1.,
                               step_x: float = 1.,
                               mode: str = "optimistic",
-                              verbose: bool = False):
+                              verbose: bool = False,
+                              warmup: int = 0):
     
         assert step_h<1 or step_h>0, "You must provide a step-size between 0 and 1."
         assert step_x<1 or step_x>0, "You must provide a step-size between 0 and 1."
@@ -507,8 +674,14 @@ class TspSolver:
         
         # Check if we are executing the first recursive iteration
         if np.all(Lu_new == None):
-            T = B2.shape[1]
-            filter = np.ones(T) if mode=="optimistic" else np.zeros(T)
+            T = self.B2.shape[1]
+            if mode=="optimistic":
+                filter = np.ones(T)
+                self.warmup=0  
+            else:
+                filter = np.zeros(T)
+                self.update_Lu(np.zeros(self.Lu.shape)) # start with an "empty" upper Laplacian
+                self.warmup = warmup
         else:
             self.update_Lu(Lu_new)
 
@@ -535,16 +708,26 @@ class TspSolver:
         sigmas["X"] = sigmas.D.apply(lambda x: sparse_transform(x, self.K0, self.Y_test))
         sigmas["NMSE"] = sigmas.apply(lambda x: nmse(x.D, x.X, self.Y_test, self.m_test), axis=1)
         
-        candidate_error = sigmas.NMSE.min()
+        if self.warmup>0:
+            candidate_error = sigmas.NMSE.min() - np.finfo(float).eps
+            self.warmup-=1
+        else:
+            candidate_error = sigmas.NMSE.min()
         idx_min = sigmas.NMSE.idxmin()
 
+        # if it==0:
+        #     return sigmas
+        
         if candidate_error < self.min_error_test:
             S = sigmas.sigma[idx_min]
             Lu_new = self.B2 @ S @ self.B2.T
             filter = np.diagonal(S)
 
             if verbose:
-                print(f'Removing 1 triangle from topology... \n ... New min test error: {candidate_error} !')
+                if mode=="optimistic":
+                    print(f'Removing 1 triangle from topology... \n ... New min test error: {candidate_error} !')
+                else:
+                    print(f'Adding 1 triangle to topology... \n ... New min test error: {candidate_error} !')
 
             return self.learn_upper_laplacian(h_prior=self.h_opt,
                                               Lu_new=Lu_new,
@@ -557,5 +740,20 @@ class TspSolver:
                                               step_x=step_x,
                                               mode=mode,
                                               verbose=verbose)
+        # for the last recursion of "pessimistic" mode try some recursion of the "optimistic"
+        # to remove the warmp-up randomly-added triangles
 
-        return self.min_error_test, self.history, self.Lu
+        if mode == "pessimistic":
+            return  self.learn_upper_laplacian(h_prior=self.h_opt,
+                                              Lu_new=Lu_new,
+                                              filter=filter,
+                                              lambda_=lambda_,
+                                              max_iter=max_iter,
+                                              patience=patience,
+                                              tol=tol,
+                                              step_h=step_h,
+                                              step_x=step_x,
+                                              mode="optimistic",
+                                              verbose=verbose)
+        self.B2 = self.B2@np.diag(filter)
+        return self.min_error_test, self.history, self.Lu, self.B2
