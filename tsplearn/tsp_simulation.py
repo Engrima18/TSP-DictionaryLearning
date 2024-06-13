@@ -83,6 +83,7 @@ def simulate_dict_param_learning(X_train,
     return dict_errors                
 
 
+# SDP vs QP vs QP complete... comment the function
 def simulate_top_learning(X_train, 
                             X_test,
                             Y_train,
@@ -95,6 +96,7 @@ def simulate_top_learning(X_train,
                             max_iter,
                             patience,
                             tol,
+                            lambda_,
                             step_h: int = 1,
                             step_x: int = 1,
                             verbose: bool = True,
@@ -118,9 +120,6 @@ def simulate_top_learning(X_train,
         min_error_sdp_test = np.zeros((n_sim, len(K0_coll)))
         algo_errors["sdp"] = min_error_sdp_test
         algo_types["sdp"] = ("SDP",False,False)
-        # min_error_sdp_comp_test = np.zeros((n_sim, len(K0_coll)))
-        # algo_errors["sdp_comp"] = min_error_sdp_comp_test
-        # algo_types["sdp_comp"] = ("SDP complete",False,True)
 
     for sim in range(n_sim):
 
@@ -152,14 +151,15 @@ def simulate_top_learning(X_train,
                     # Learn only the dictionary (no topology)
                     else:
                         if a[1][1]:
-                            algo_errors[a[0]][sim,k0_index], _, _ = model.topological_dictionary_learn(lambda_=lambda_, 
+                            algo_errors[a[0]][sim,k0_index], _, _ = model.topological_dictionary_learn_qp(lambda_=lambda_, 
                                                                                                         max_iter=max_iter,
                                                                                                         patience=patience, 
                                                                                                         tol=tol,
                                                                                                         step_h=step_h,
                                                                                                         step_x=step_x)
+
                         else:
-                            algo_errors[a[0]][sim,k0_index], _, _ = model.topological_dictionary_learn_qp(lambda_=lambda_, 
+                            algo_errors[a[0]][sim,k0_index], _, _ = model.topological_dictionary_learn(lambda_=lambda_, 
                                                                                                         max_iter=max_iter,
                                                                                                         patience=patience, 
                                                                                                         tol=tol,

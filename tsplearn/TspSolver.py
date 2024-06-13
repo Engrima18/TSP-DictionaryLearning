@@ -2,10 +2,22 @@ import scipy.linalg as sla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
+from .tsp_generation import *
+from .EnhancedGraph import EnhancedGraph
+from typing import Tuple, List, Union, Dict
+import pickle
+from functools import wraps
+
+
+import scipy.linalg as sla
+import numpy as np
+import numpy.linalg as la
+import cvxpy as cp
 from tsplearn.tsp_generation import *
 from typing import Tuple, List, Union, Dict
 import pickle
 from functools import wraps
+from einops import rearrange
 
 
 def _indicator_matrix(row):
@@ -23,12 +35,19 @@ def _compute_Luj(row, b2, J):
     Luj = np.array([la.matrix_power(Lu, i) for i in range(1, J + 1)])
     return Luj
 
-def _split_coeffs(h ,s ,k):
+def _split_coeffs(h ,s ,k, sep=False):
     h_tmp = h.value.flatten()
-    hH = h_tmp[np.arange(0, (s*(2*k+1)), (2*k+1))].reshape((s,1))
-    hS = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(2*k+1)), (2*k+1))])].reshape((s,k))
-    hI = h_tmp[np.hstack([[i,i+1] for i in range((k+1), (s*(2*k+1)), (2*k+1))])].reshape((s,k))
-    return [hH, hS, hI]
+    # hH = h_tmp[:s,].reshape((s,1))
+    # hS = h_tmp[s:s*(k+1),].reshape((s,k))
+    # hI = h_tmp[s*(k+1):,].reshape((s,k))
+    if sep:
+        hH = h_tmp[np.arange(0, (s*(2*k+1)), (2*k+1))].reshape((s,1))
+        hS = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(2*k+1)), (2*k+1))])].reshape((s,k))
+        hI = h_tmp[np.hstack([[i,i+1] for i in range((k+1), (s*(2*k+1)), (2*k+1))])].reshape((s,k))
+        return [hH, hS, hI]
+    h = h_tmp[:s*k]
+    hi = h_tmp[s*k:]
+    return [h, hi]
     
 def sparse_transform(D, K0, Y_te, Y_tr=None):
 
@@ -146,7 +165,9 @@ class TspSolver:
             hh = np.zeros((self.P,1))
             self.h_opt: List[np.ndarray] = [hh,hs,hi]
         else:
-            self.h_opt: np.ndarray = np.zeros((self.P*(self.J+1),1))
+            h = np.zeros((self.P, self.J))
+            hI = np.zeros((self.P, 1))
+            self.h_opt: np.ndarray = [h, hI]
             
         self.X_opt_train: np.ndarray = np.zeros(self.X_train.shape)
         self.X_opt_test: np.ndarray = np.zeros(self.X_test.shape)
@@ -422,8 +443,8 @@ class TspSolver:
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
                     # Init the variables
                     h = cp.Variable((self.P, self.J))
-                    h.value = h_opt
                     hI = cp.Variable((self.P, 1))
+                    h.value, hI.value = h_opt
                     for i in range(0,self.P):
                         tmp =  cp.Constant(np.zeros((self.M, self.M)))
                         for j in range(0,self.J):
@@ -469,7 +490,8 @@ class TspSolver:
                 # Dictionary Update
                 D = D.value
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
-                    h_opt = h_opt + step_h*(h.value - h_opt)
+                    h_opt = [h_opt[0] + step_h*(h.value - h_opt[0]),
+                             h_opt[1] + step_h*(hI.value - h_opt[1])]
                 else:
                     h_opt = [h_opt[0] + step_h*(hH.value-h_opt[0]),
                              h_opt[1] + step_h*(hS.value-h_opt[1]), 
@@ -513,8 +535,8 @@ class TspSolver:
             self.X_opt_test, self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_test, self.Y_train)
 
             # Error Updating
-            self.min_error_train = nmse(D, self.X_opt_train, self.Y_train, self.m_train)
-            self.min_error_test= nmse(D, self.X_opt_test, self.Y_test, self.m_test)
+            self.min_error_train = nmse(self.D_opt, self.X_opt_train, self.Y_train, self.m_train)
+            self.min_error_test= nmse(self.D_opt, self.X_opt_test, self.Y_test, self.m_test)
             
         return self.min_error_test, self.min_error_train, hist
     
@@ -522,16 +544,22 @@ class TspSolver:
     def _aux_matrix_update(self, X):
 
         I = [np.eye(self.M)]
-        LLu = [lu for lu in self.Luj]
-        LLd = [ld for ld in self.Ldj]
-        LL = np.array(I+LLu+LLd)
-        self.P_aux = np.array([LL@X[(i*self.M): ((i+1)*self.M), :] for i in range(self.P)])
+        if self.dictionary_type=="separated":
+            LLu = [lu for lu in self.Luj]
+            LLd = [ld for ld in self.Ldj]
+            LL = np.array(I+LLu+LLd)
+        else:
+            LL = np.array(I + [l for l in self.Lj])
+
+        P_aux = np.array([LL@X[(i*self.M): ((i+1)*self.M), :] for i in range(self.P)])
+        self.P_aux = rearrange(P_aux, 'b h w c -> (b h) w c')
     
     def topological_dictionary_learn_qp(self,
                                         lambda_: float = 1e-3, 
                                         max_iter: int = 10, 
                                         patience: int = 10,
                                         tol: float = 1e-7,
+                                        solver: str = 'MOSEK',
                                         step_h: float = 1.,
                                         step_x: float = 1.,
                                         verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, List[float]]:
@@ -544,11 +572,9 @@ class TspSolver:
         
             # Init the the sparse representation
             h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1,1)
-            Y = cp.Constant(self.Y_train)
             X_tr = self.X_opt_train
             X_te = self.X_opt_test
-            # I = np.eye(self.M)
-            I_2 = cp.Constant(np.eye(self.P*(2*self.J+1)))
+            reg = lambda_ * np.eye(self.P*(2*self.J+1))
             I_s = cp.Constant(np.eye(self.P))
             i_s = cp.Constant(np.ones((self.P,1)))
             B = cp.Constant(self.B)
@@ -556,25 +582,12 @@ class TspSolver:
             while pat_iter < patience and iter_ <= max_iter:
 
                 # Init variables and parameters
-                self._aux_matrix_update(X_tr)
                 h = cp.Variable((self.P*(2*self.J+1), 1))
-                # h.value = h_opt
+                self._aux_matrix_update(X_tr)
+                h.value = h_opt
 
-                # P_transposed = self.P_aux.transpose(2, 3, 0, 1)
-                # l = cp.Constant(np.einsum('mn,mnij->ij', Y, P_transposed).reshape(-1))
-                # P_reshaped = self.P_aux.reshape(self.P*(2*self.J+1), -1)
-                # Q = np.dot(P_reshaped, P_reshaped.T)
-
-                l = cp.Constant(np.zeros((self.P*(2*self.J+1), 1)))
-                Q = cp.Constant(np.zeros((self.P*(2*self.J+1), self.P*(2*self.J+1))))
-
-                for i in range(self.M):
-                    for j in range(self.m_train):
-                        Pij = cp.Constant(self.P_aux[:,:,i,j].flatten().reshape(-1,1))
-                        l = l + (Y[i,j]*Pij.T)
-                        Q = Q + Pij@Pij.T
-
-                Q = Q + cp.multiply(lambda_, I_2)
+                Q = cp.Constant(np.einsum('imn, lmn -> il', self.P_aux, self.P_aux) + reg)
+                l = cp.Constant(np.einsum('mn, imn -> i', self.Y_train, self.P_aux))
 
                 # Quadratic term
                 term2 = cp.quad_form(h, Q, assume_PSD = True)
@@ -593,28 +606,19 @@ class TspSolver:
                                 [cons2 <= (self.c + self.epsilon)]
 
                 prob = cp.Problem(obj, constraints)
-                prob.solve(solver=cp.MOSEK, verbose=True)
+                prob.solve(solver=eval(f'cp.{solver}'), verbose=False)
 
                 # Update the dictionary
-                D_coll = []
 
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
+                    h_list = _split_coeffs(h, self.P, self.J)
+                    D = generate_dictionary(h.value, self.P, self.Lj)                      
                     h_opt = h_opt + step_h*(h.value - h_opt)
                 else:
 
-                    h_list = _split_coeffs(h, self.P, self.J)
-                    D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)
-
-                    # for i in range(0, self.P):
-                    #     hu = hS[i].reshape(self.J,1,1)
-                    #     hd = hI[i].reshape(self.J,1,1)
-                    #     hid = hH[i]
-                    #     tmp = np.sum(hu*self.Luj + hd*self.Ldj, axis=0) + hid*I
-                    #     D_coll.append(tmp)
-                                
-                    # h_opt = h_opt + step_h*(h.value - h_opt)
-
-                    # D = np.hstack(tuple(D_coll))
+                    h_list = _split_coeffs(h, self.P, self.J, sep=True)
+                    D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)                                
+                    h_opt = h_opt + step_h*(h.value - h_opt)
 
 
                 # OMP Step
@@ -666,7 +670,9 @@ class TspSolver:
                               step_x: float = 1.,
                               mode: str = "optimistic",
                               verbose: bool = False,
-                              warmup: int = 0):
+                              warmup: int = 0,
+                              QP=False,
+                              cont=False):
     
         assert step_h<1 or step_h>0, "You must provide a step-size between 0 and 1."
         assert step_x<1 or step_x>0, "You must provide a step-size between 0 and 1."
@@ -688,12 +694,22 @@ class TspSolver:
         self.init_dict(h_prior=h_prior,
                        mode="only_X")
 
-        _, _, hist = self.topological_dictionary_learn(lambda_=lambda_,
-                                                        max_iter=max_iter,
-                                                        patience=patience,
-                                                        tol=tol,
-                                                        step_h=step_h,
-                                                        step_x=step_x)
+        if QP:
+            _, _, hist = self.topological_dictionary_learn_qp(lambda_=lambda_,
+                                                            max_iter=max_iter,
+                                                            patience=patience,
+                                                            tol=tol,
+                                                            step_h=step_h,
+                                                            step_x=step_x,
+                                                            solver='GUROBI')
+        else:
+            _, _, hist = self.topological_dictionary_learn(lambda_=lambda_,
+                                                            max_iter=max_iter,
+                                                            patience=patience,
+                                                            tol=tol,
+                                                            step_h=step_h,
+                                                            step_x=step_x)
+                        
         self.history.append(hist)
         search_space = np.where(filter == 1) if mode=="optimistic" else np.where(filter == 0)   
         sigmas = pd.DataFrame({"idx": search_space[0]})
@@ -715,8 +731,6 @@ class TspSolver:
             candidate_error = sigmas.NMSE.min()
         idx_min = sigmas.NMSE.idxmin()
 
-        # if it==0:
-        #     return sigmas
         
         if candidate_error < self.min_error_test:
             S = sigmas.sigma[idx_min]
@@ -739,11 +753,13 @@ class TspSolver:
                                               step_h=step_h,
                                               step_x=step_x,
                                               mode=mode,
-                                              verbose=verbose)
-        # for the last recursion of "pessimistic" mode try some recursion of the "optimistic"
-        # to remove the warmp-up randomly-added triangles
-
-        if mode == "pessimistic":
+                                              verbose=verbose,
+                                              QP=QP,
+                                              cont=cont)
+        
+        # For the last recursions of "pessimistic" mode try some recursion of the "optimistic"
+        # to remove the warm-up randomly-added triangles
+        if mode == "pessimistic" and not cont:
             return  self.learn_upper_laplacian(h_prior=self.h_opt,
                                               Lu_new=Lu_new,
                                               filter=filter,
@@ -754,6 +770,30 @@ class TspSolver:
                                               step_h=step_h,
                                               step_x=step_x,
                                               mode="optimistic",
-                                              verbose=verbose)
+                                              verbose=verbose,
+                                              QP=QP,
+                                              cont=True)
+        
+        # Then after we added triangles and removed the randomly added ones, continue adding!
+        elif mode != "pessimistic" and cont:
+
+            print("Ce provo!")
+            return  self.learn_upper_laplacian(h_prior=self.h_opt,
+                                              Lu_new=Lu_new,
+                                              filter=filter,
+                                              lambda_=lambda_,
+                                              max_iter=max_iter,
+                                              patience=patience,
+                                              tol=tol,
+                                              step_h=step_h,
+                                              step_x=step_x,
+                                              mode="pessimistic",
+                                              verbose=verbose,
+                                              QP=QP,
+                                              cont=cont,
+                                              warmup=warmup)  
+                  
         self.B2 = self.B2@np.diag(filter)
         return self.min_error_test, self.history, self.Lu, self.B2
+
+
