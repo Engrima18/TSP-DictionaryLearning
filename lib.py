@@ -1,5 +1,5 @@
 # written by T. Mitchell Roddenberry, July 2021
-# follo me on twitta: mitch.roddenberry.xyz/rss.xml
+# follow me on twitter: mitch.roddenberry.xyz/rss.xml
 
 import numpy as np
 #from numpy.polynomial import Chebyshev as Cheb
@@ -107,7 +107,7 @@ class FourierBasis(Hodgelet):
 
 class SimplicianSlepians(Hodgelet):
 
-  def __init__(self, B1, B2, S = None,F = None, top_K = None, save_dic = True,\
+  def __init__(self, B1, B2, S = None, F = None, verbose = True, top_K = None, save_dic = True,\
                save_dir = "/Users/Claudio/Desktop/hodgelets/figs/hexgrid/slepians/saved_dictionaries" ,\
                load_dir = "/Users/Claudio/Desktop/hodgelets/figs/hexgrid/slepians/saved_dictionaries"):
     super().__init__(B1, B2) 
@@ -125,7 +125,8 @@ class SimplicianSlepians(Hodgelet):
         # Harmonic
         idx_harm = abs(self.eigenvals)<1e-12
         if sum(idx_harm) > 0:
-            print("Harmonic Component is Present!")
+            if verbose:
+                print("Harmonic Component is Present!")
             self.atoms_har_np = self.U[:,idx_harm]
         
         self.atoms_sol = []
@@ -189,7 +190,8 @@ class SimplicianSlepians(Hodgelet):
             pd.DataFrame(self.atoms_flat).to_csv(save_dir+"/top_K_"\
                                           + str(top_K)+".csv")
         except:
-            print("Saving Directory not Valid!")
+            if verbose:
+                print("Saving Directory not Valid!")
         
     
     

@@ -13,5 +13,6 @@ __all__ = [
     'plot_algo_errors',
     'plot_learnt_topology',
     'simulate_dict_param_learning',
-    'simulate_top_learning'
+    'simulate_top_learning',
+    'simulate_learnable_vs_analytic'
 ]

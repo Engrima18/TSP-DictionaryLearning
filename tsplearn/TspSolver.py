@@ -3,17 +3,8 @@ import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
 from .tsp_generation import *
+from .tsp_hodgelet import * # SeparateHodgelet, SimplicianSlepians
 from .EnhancedGraph import EnhancedGraph
-from typing import Tuple, List, Union, Dict
-import pickle
-from functools import wraps
-
-
-import scipy.linalg as sla
-import numpy as np
-import numpy.linalg as la
-import cvxpy as cp
-from tsplearn.tsp_generation import *
 from typing import Tuple, List, Union, Dict
 import pickle
 from functools import wraps
@@ -45,13 +36,14 @@ def _split_coeffs(h ,s ,k, sep=False):
         hS = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(2*k+1)), (2*k+1))])].reshape((s,k))
         hI = h_tmp[np.hstack([[i,i+1] for i in range((k+1), (s*(2*k+1)), (2*k+1))])].reshape((s,k))
         return [hH, hS, hI]
-    h = h_tmp[:s*k]
-    hi = h_tmp[s*k:]
-    return [h, hi]
+    hi = h_tmp[np.arange(0, (s*(k+1)), (k+1))].reshape((s,1))
+    h = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(k+1)), (k+1))])].reshape((s,k))
+    return np.hstack([h, hi])
     
 def sparse_transform(D, K0, Y_te, Y_tr=None):
 
-    dd = la.norm(D, axis=0)
+    ep = np.finfo(float).eps # to avoid some underflow problems
+    dd = la.norm(D, axis=0) + ep
     W = np.diag(1. / dd)
     Domp = D @ W
     X_te = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_te)
@@ -104,7 +96,12 @@ class TspSolver:
                 'prob_T': 1.,   # Ratio of colored triangles
                 'true_prob_T': 1.,   # True ratio of colored triangles
                 'p_edges': 1.,  # Probability of edge existence
-                'seed': None
+                'seed': None,       ####
+                'option' : "One-shot-diffusion",        ####
+                'diff_order_sol' : 1,       ####
+                'diff_order_irr' : 1,       ####
+                'step_prog' : 1,        ####
+                'top_k_slepians' : 2        ####
                 }
         
         if args:
@@ -126,7 +123,8 @@ class TspSolver:
         self.G = EnhancedGraph(n=params['n'],
                                p_edges=params['p_edges'], 
                                p_triangles=params['prob_T'], 
-                               seed=params['seed'])
+                               seed=params['seed']) 
+        # Incidence matrices
         self.B1: np.ndarray = self.G.get_b1()
         self.B2: np.ndarray = self.G.get_b2()
 
@@ -135,30 +133,46 @@ class TspSolver:
             self.B1 = self.B1[:, :params['sub_size']]
             self.B2 = self.B2[:params['sub_size'], :]
             self.B2 = self.B2[:,np.sum(np.abs(self.B2), 0) == 3]
+        
+        # Topology dimensions and hyperparameters
         self.nu: int = self.B2.shape[1]
         self.nd: int = self.B1.shape[1]
         self.true_prob_T = params['true_prob_T']
         self.T: int = int(np.ceil(self.nu*(1-params['prob_T'])))
 
-        # Laplacians
+        # Laplacians according to the Hodge Theory for cell complexes
         Lu, Ld, L = self.G.get_laplacians(sub_size=params['sub_size'])
-        self.Lu: np.ndarray = Lu
-        self.Ld: np.ndarray = Ld
-        self.L: np.ndarray = L
-        self.Lu_full: np.ndarray = G.get_laplacians(sub_size=params['sub_size'], 
+        self.Lu: np.ndarray = Lu                             # Ground-truth upper Laplacian
+        self.Ld: np.ndarray = Ld                             # Ground-truth lower Laplacian
+        self.L: np.ndarray = L                               # Ground-truth sum Laplacian
+        self.Lu_full: np.ndarray = self.G.get_laplacians(sub_size=params['sub_size'], 
                                                     full=True)
         self.M =  L.shape[0]
+        
+
+        # Dictionary hyperparameters
+        self.P = params['P']                                 # Number of sub-dicts
+        self.J = params['J']                                 # Polynomial order for the Hodge Laplacian
+        self.c = params['c']                                 # Hyperparameter for stability in frequency domain
+        self.epsilon = params['epsilon']                     # Hyperparameter for stability in frequency domain
+        self.K0 = params['K0']                               # Assumed sparsity level
+        self.dictionary_type = params['dictionary_type']
+        # Init optimal values for sparse representations and overcomplete dictionary
+        self.D_opt: np.ndarray = np.zeros((self.M, self.M*self.P))
+        self.X_opt_train: np.ndarray = np.zeros(self.X_train.shape)
+        self.X_opt_test: np.ndarray = np.zeros(self.X_test.shape)
+        # Init the learning errors and error curve (history)
+        self.min_error_train = 1e20
+        self.min_error_test = 1e20
         self.history: List[np.ndarray] = []
 
-        # Dictionary, parameters and hyperparameters for compression
-        self.P = params['P']
-        self.J = params['J']
-        self.c = params['c']
-        self.epsilon = params['epsilon']
-        self.K0 = params['K0']
-        self.dictionary_type = params['dictionary_type']
-        self.D_opt: np.ndarray = np.zeros((self.M, self.M*self.P))
+        ############################################################################################################
+        ##                                                                                                        ##
+        ##               This section is only for learnable (data-driven) dictionaries                            ##
+        ##                                                                                                        ##
+        ############################################################################################################
 
+        # Init the dictionary parameters according to the specific parameterization setup
         if self.dictionary_type=="separated":
             hs = np.zeros((self.P,self.J))
             hi = np.zeros((self.P,self.J))
@@ -166,12 +180,11 @@ class TspSolver:
             self.h_opt: List[np.ndarray] = [hh,hs,hi]
         else:
             h = np.zeros((self.P, self.J))
-            hI = np.zeros((self.P, 1))
-            self.h_opt: np.ndarray = [h, hI]
-            
-        self.X_opt_train: np.ndarray = np.zeros(self.X_train.shape)
-        self.X_opt_test: np.ndarray = np.zeros(self.X_test.shape)
+            hi = np.zeros((self.P, 1))
+            self.h_opt: List[np.ndarray] = [hi, h]
 
+        # Compute the polynomial extension for the Laplacians and the auxiliary 
+        # "pseudo-vandermonde" matrix for the constraints in the quadratic form
         if self.dictionary_type == "joint":
             self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(self.L, self.J)
             self.B = compute_vandermonde(self.L, self.J).real
@@ -185,11 +198,40 @@ class TspSolver:
             self.Bd = compute_vandermonde(self.Ld, self.J)[:, 1:].real
             self.B = np.hstack([self.Bu, self.Bd])
 
+        # Auxiliary matrix to define quadratic form dor the dictionary learning step
         self.P_aux: np.ndarray = None
+        # Flag variable: the dictionary is learnable or analytic
+        self.dict_is_learnable = self.dictionary_type in ["separated", "joint", "edge_laplacian"]
 
-        # Init the learning errors
-        self.min_error_train = 1e20
-        self.min_error_test = 1e20
+        # Auxiliary tools for the Slepians-based dictionary setup
+        if self.dictionary_type == 'slepians':
+            self.option = params['option']
+            self.diff_order_sol = params['diff_order_sol']
+            self.step_prog = params['step_prog']
+            self.diff_order_irr = params['diff_order_irr']
+            self.source_sol = np.ones((self.nd,))
+            self.source_irr = np.ones((self.nd,))
+            self.top_K_slepians = params['top_k_slepians']
+            self.spars_level = list(range(10,80,10))
+            # Remember that this part should be updated if B2 or Lu are updated!
+            self.F_sol,self.F_irr = get_frequency_mask(self.B1,self.B2) # Get frequency bands
+            self.S_neigh, self.complete_coverage = cluster_on_neigh(self.B1,
+                                                                    self.B2,
+                                                                    self.diff_order_sol,
+                                                                    self.diff_order_irr,
+                                                                    self.source_sol,
+                                                                    self.source_irr,
+                                                                    self.option,
+                                                                    self.step_prog)
+            self.R = [self.F_sol, self.F_irr]
+            self.S = self.S_neigh
+
+        # Auxiliary tools for the Wavelet-based dictionary setup
+        elif self.dictionary_type == 'wavelet':
+            # Remember that this part should be updated if B2 or Lu are updated!
+            self.w1 = np.linalg.eigvalsh(self.Lu)
+            self.w2 = np.linalg.eigvalsh(self.Ld)
+            
 
     # def fit(self) -> Tuple[float, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     #     min_error_test, _, _, h_opt, X_opt_test, D_opt = self.learn_upper_laplacian()
@@ -262,12 +304,13 @@ class TspSolver:
         # If no prior info on the dictionary
         if np.all(h_prior == None):
 
+            # Init Dictionary
             if (mode in ["all","only_D"]):
 
                 discard = 1
                 while discard==1:
 
-                    if dictionary_type != "separated":
+                    if self.dictionary_type != "separated":
                         h_prior, discard = self._multiplier_search(self.lambda_max_j, 
                                                               self.lambda_min_j, 
                                                               P=self.P, 
@@ -289,7 +332,8 @@ class TspSolver:
                                                          self.P, 
                                                          self.Luj, 
                                                          self.Ldj)
-        
+
+            # Init Sparse Representations
             if (mode in ["all","only_X"]):
                 
                 L = self.Ld if self.dictionary_type == "edge_laplacian" else self.L
@@ -302,12 +346,12 @@ class TspSolver:
                 X = np.tile(X, (self.P,1))
                 self.X_opt_train = X
 
-        # Otherwise use prior info about the dictionary to initialize the sparse representation
+        # Otherwise use prior info about the dictionary to initialize both the dictionary and the sparse representation
         else:
             
             self.h_opt = h_prior
 
-            if dictionary_type == "separated":
+            if self.dictionary_type == "separated":
                 self.D_opt = generate_dictionary(h_prior, 
                                                  self.P, 
                                                  self.Luj, 
@@ -420,7 +464,7 @@ class TspSolver:
         iter_, pat_iter = 1, 0
         hist = []
 
-        if self.dictionary_type != "fourier":
+        if self.dict_is_learnalbe:
 
             # Init the dictionary and the sparse representation 
             D_coll = [cp.Constant(self.D_opt[:,(self.M*i):(self.M*(i+1))]) for i in range(self.P)]
@@ -549,7 +593,8 @@ class TspSolver:
             LLd = [ld for ld in self.Ldj]
             LL = np.array(I+LLu+LLd)
         else:
-            LL = np.array(I + [l for l in self.Lj])
+            LL = [l for l in self.Lj]
+            LL = np.array(I + LL)
 
         P_aux = np.array([LL@X[(i*self.M): ((i+1)*self.M), :] for i in range(self.P)])
         self.P_aux = rearrange(P_aux, 'b h w c -> (b h) w c')
@@ -559,7 +604,7 @@ class TspSolver:
                                         max_iter: int = 10, 
                                         patience: int = 10,
                                         tol: float = 1e-7,
-                                        solver: str = 'MOSEK',
+                                        solver: str = 'GUROBI',
                                         step_h: float = 1.,
                                         step_x: float = 1.,
                                         verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, List[float]]:
@@ -568,13 +613,15 @@ class TspSolver:
         iter_, pat_iter = 1, 0
         hist = []
 
-        if self.dictionary_type != "fourier":
-        
+        # Learnable Dictionary -> ADMM optimization algorithm
+        if self.dict_is_learnable:
+            
             # Init the the sparse representation
             h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1,1)
             X_tr = self.X_opt_train
             X_te = self.X_opt_test
-            reg = lambda_ * np.eye(self.P*(2*self.J+1))
+            f = 2 if self.dictionary_type == "separated" else 1
+            reg = lambda_ * np.eye(self.P*(f*self.J+1))
             I_s = cp.Constant(np.eye(self.P))
             i_s = cp.Constant(np.ones((self.P,1)))
             B = cp.Constant(self.B)
@@ -582,7 +629,7 @@ class TspSolver:
             while pat_iter < patience and iter_ <= max_iter:
 
                 # Init variables and parameters
-                h = cp.Variable((self.P*(2*self.J+1), 1))
+                h = cp.Variable((self.P*(f*self.J+1), 1)) 
                 self._aux_matrix_update(X_tr)
                 h.value = h_opt
 
@@ -611,8 +658,10 @@ class TspSolver:
                 # Update the dictionary
 
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
-                    h_list = _split_coeffs(h, self.P, self.J)
-                    D = generate_dictionary(h.value, self.P, self.Lj)                      
+                    h_tmp = _split_coeffs(h, self.P, self.J)
+                    # print(h_tmp.shape)
+                    # h_tmp = h.value.reshape(self.P, self.J+1)
+                    D = generate_dictionary(h_tmp, self.P, self.Lj)                      
                     h_opt = h_opt + step_h*(h.value - h_opt)
                 else:
 
@@ -652,8 +701,36 @@ class TspSolver:
 
                 iter_ += 1
         
+        # Analytic Dictionary -> directly go to OMP step
         else:
-            pass
+            
+            if self.dictionary_type == "fourier":
+                # Fourier Dictionary Benchmark
+                _, self.D_opt = sla.eigh(self.L)
+
+            elif self.dictionary_type == "slepians":
+                SS = SimplicianSlepians(self.B1, 
+                                        self.B2, 
+                                        self.S, 
+                                        self.R,
+                                        verbose=False, 
+                                        top_K = self.top_K_slepians)
+                self.D_opt = SS.atoms_flat
+                
+
+            elif self.dictionary_type == "wavelet":
+                SH = SeparateHodgelet(self.B1, 
+                                      self.B2,
+                                      *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w1))),
+                                      *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w2))))
+                self.D_opt = SH.atoms_flat
+                # print(self.D_opt.shape)
+            
+            # OMP
+            self.X_opt_test, self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_test, self.Y_train)
+            # Error Updating
+            self.min_error_train = nmse(self.D_opt, self.X_opt_train, self.Y_train, self.m_train)
+            self.min_error_test= nmse(self.D_opt, self.X_opt_test, self.Y_test, self.m_test)
 
         return self.min_error_test, self.min_error_train, hist
     
@@ -795,5 +872,3 @@ class TspSolver:
                   
         self.B2 = self.B2@np.diag(filter)
         return self.min_error_test, self.history, self.Lu, self.B2
-
-
