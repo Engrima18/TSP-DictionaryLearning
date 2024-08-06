@@ -1,81 +1,91 @@
-import pickle
-import os
-import hashlib
-from functools import wraps
-
-def memoize(file_name='cache\\DataTS.pkl'):
-    '''
-    Decorator for caching function results in a pickle file
-    and speed up the calculation.
-    '''
-    def decorator(func):
-        def wrapper(self, *args, **kwargs):
-
-            graph_hash = hashlib.sha256(str((sorted(self.edges()), self.id)).encode()).hexdigest()
-            key = f"{func.__name__}_{graph_hash}"
-            
-            if os.path.exists(file_name):
-                with open(file_name, 'rb') as file:
-                    try:
-                        data = pickle.load(file)
-                    except EOFError:
-                        data = {}
-                if key in data:
-                    return data[key]
-
-            result = func(self, *args, **kwargs)
-            try:
-                if os.path.exists(file_name):
-                    with open(file_name, 'rb') as file:
-                        data = pickle.load(file)
-                else:
-                    data = {}
-            except EOFError:
-                data = {}
-            data[key] = result
-            with open(file_name, 'wb') as file:
-                pickle.dump(data, file)
-
-            return result
-        return wrapper
-    return decorator
+import scipy.linalg as sla
+import numpy as np
+import pandas as pd
+import numpy.linalg as la
+import cvxpy as cp
+from .tsp_generation import get_omp_coeff
 
 
-def memoize_or_save(func):
-    @wraps(func)
-    def wrapper(Lu, Ld, **kwargs):
-        # Construct file paths based on function arguments
-        dictionary_type = kwargs.get('dictionary_type', 'separated')
-        prob_T = kwargs.get('prob_T', 1)
+def _indicator_matrix(row):
+    tmp = row.sigma.copy()
+    tmp[row.idx] = 0
+    return np.diag(tmp)
 
-        if prob_T == 1:
-            name = f'full_data_{dictionary_type}'
-        else:
-            name = f'top_data_T{int(prob_T*100)}'
-        path = os.getcwd()
-        dir_path = f'{path}\\synthetic_data'
-        filename = f'{dir_path}\\{name}.pkl'
 
-        try:
-            # Try to load data from file
-            with open(filename, 'rb') as f: 
-                data = pickle.load(f)
-            f.close()
-        except FileNotFoundError:
-            # If file not found, generate data and save
-            D_true, Y_train, Y_test, X_train, X_test, epsilon_true, c_true = func(Lu, Ld, **kwargs)
-            data = {'D_true':D_true,
-                    'Y_train':Y_train,
-                    'Y_test':Y_test,
-                    'X_train':X_train,
-                    'X_test':X_test,
-                    'epsilon_true':epsilon_true,
-                    'c_true':c_true}
+def _indicator_matrix_rev(row):
+    tmp = row.sigma.copy()
+    tmp[row.idx] = 1
+    return np.diag(tmp)
 
-            os.makedirs(dir_path, exist_ok=True)
-            with open(filename, 'wb') as f:
-                pickle.dump(data, f)
-            f.close()
-        return data
 
-    return wrapper
+def _compute_Luj(row, b2, J):
+    Lu = b2 @ row.sigma @ b2.T
+    Luj = np.array([la.matrix_power(Lu, i) for i in range(1, J + 1)])
+    return Luj
+
+
+def _split_coeffs(h, s, k, sep=False):
+    h_tmp = h.value.flatten()
+    # hH = h_tmp[:s,].reshape((s,1))
+    # hS = h_tmp[s:s*(k+1),].reshape((s,k))
+    # hI = h_tmp[s*(k+1):,].reshape((s,k))
+    if sep:
+        hH = h_tmp[np.arange(0, (s * (2 * k + 1)), (2 * k + 1))].reshape((s, 1))
+        hS = h_tmp[
+            np.hstack([[i, i + 1] for i in range(1, (s * (2 * k + 1)), (2 * k + 1))])
+        ].reshape((s, k))
+        hI = h_tmp[
+            np.hstack(
+                [[i, i + 1] for i in range((k + 1), (s * (2 * k + 1)), (2 * k + 1))]
+            )
+        ].reshape((s, k))
+        return [hH, hS, hI]
+    hi = h_tmp[np.arange(0, (s * (k + 1)), (k + 1))].reshape((s, 1))
+    h = h_tmp[
+        np.hstack([[i, i + 1] for i in range(1, (s * (k + 1)), (k + 1))])
+    ].reshape((s, k))
+    return np.hstack([h, hi])
+
+
+def sparse_transform(D, K0, Y_te, Y_tr=None):
+
+    ep = np.finfo(float).eps  # to avoid some underflow problems
+    dd = la.norm(D, axis=0) + ep
+    W = np.diag(1.0 / dd)
+    Domp = D @ W
+    X_te = np.apply_along_axis(
+        lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_te
+    )
+    # Normalization
+    X_te = W @ X_te
+
+    if np.all(Y_tr == None):
+
+        return X_te
+
+    # Same for the training set
+    X_tr = np.apply_along_axis(
+        lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_tr
+    )
+    X_tr = W @ X_tr
+
+    return X_te, X_tr
+
+
+def compute_vandermonde(L, k):
+
+    def polynomial_exp(x, k):
+        x = x ** np.arange(0, k + 1)
+        return x
+
+    eigenvalues, _ = sla.eig(L)
+    idx = eigenvalues.argsort()
+    tmp_df = pd.DataFrame({"Eigs": eigenvalues[idx]})
+    tmp_df["Poly"] = tmp_df["Eigs"].apply(lambda x: polynomial_exp(x, k))
+    B = np.vstack(tmp_df["Poly"].to_numpy())
+
+    return B
+
+
+def nmse(D, X, Y, m):
+    return (1 / m) * np.sum(la.norm(Y - (D @ X), axis=0) ** 2 / la.norm(Y, axis=0) ** 2)

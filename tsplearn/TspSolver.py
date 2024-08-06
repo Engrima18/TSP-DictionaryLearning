@@ -3,7 +3,8 @@ import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
 from .tsp_generation import *
-from .tsp_hodgelet import * # SeparateHodgelet, SimplicianSlepians
+from .tsp_utils import *
+from .tsp_hodgelet import *  # SeparateHodgelet, SimplicianSlepians
 from .EnhancedGraph import EnhancedGraph
 from typing import Tuple, List, Union, Dict
 import pickle
@@ -11,102 +12,35 @@ from functools import wraps
 from einops import rearrange
 
 
-def _indicator_matrix(row):
-    tmp = row.sigma.copy()
-    tmp[row.idx] = 0
-    return np.diag(tmp)
-
-def _indicator_matrix_rev(row):
-    tmp = row.sigma.copy()
-    tmp[row.idx] = 1
-    return np.diag(tmp)
-
-def _compute_Luj(row, b2, J):
-    Lu = b2 @ row.sigma @ b2.T
-    Luj = np.array([la.matrix_power(Lu, i) for i in range(1, J + 1)])
-    return Luj
-
-def _split_coeffs(h ,s ,k, sep=False):
-    h_tmp = h.value.flatten()
-    # hH = h_tmp[:s,].reshape((s,1))
-    # hS = h_tmp[s:s*(k+1),].reshape((s,k))
-    # hI = h_tmp[s*(k+1):,].reshape((s,k))
-    if sep:
-        hH = h_tmp[np.arange(0, (s*(2*k+1)), (2*k+1))].reshape((s,1))
-        hS = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(2*k+1)), (2*k+1))])].reshape((s,k))
-        hI = h_tmp[np.hstack([[i,i+1] for i in range((k+1), (s*(2*k+1)), (2*k+1))])].reshape((s,k))
-        return [hH, hS, hI]
-    hi = h_tmp[np.arange(0, (s*(k+1)), (k+1))].reshape((s,1))
-    h = h_tmp[np.hstack([[i,i+1] for i in range(1, (s*(k+1)), (k+1))])].reshape((s,k))
-    return np.hstack([h, hi])
-    
-def sparse_transform(D, K0, Y_te, Y_tr=None):
-
-    ep = np.finfo(float).eps # to avoid some underflow problems
-    dd = la.norm(D, axis=0) + ep
-    W = np.diag(1. / dd)
-    Domp = D @ W
-    X_te = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_te)
-    # Normalization
-    X_te = W @ X_te
-
-    if np.all(Y_tr == None):
-
-        return X_te
-    
-    # Same for the training set
-    X_tr = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_tr)
-    X_tr = W @ X_tr
-    
-    return X_te, X_tr
-
-
-def compute_vandermonde(L, k):
-    
-    def polynomial_exp(x, k):
-        x = x** np.arange(0, k + 1)
-        return x
-
-    eigenvalues, _ = sla.eig(L)
-    idx = eigenvalues.argsort()
-    tmp_df = pd.DataFrame({'Eigs': eigenvalues[idx]})
-    tmp_df['Poly'] = tmp_df['Eigs'].apply(lambda x:  polynomial_exp(x,k))
-    B = np.vstack(tmp_df['Poly'].to_numpy())
-
-    return B
-
-
-def nmse(D, X, Y, m):
-    return (1/m)* np.sum(la.norm(Y - (D @ X), axis=0)**2 /la.norm(Y, axis=0)**2)
-
-
 class TspSolver:
 
     def __init__(self, X_train, X_test, Y_train, Y_test, *args, **kwargs):
 
         params = {
-                'P': None,      # Number of Kernels (Sub-dictionaries)
-                'J': None,      # Polynomial order
-                'K0': None,     # Sparsity level
-                'dictionary_type': None,
-                'c': None,      # spectral control parameter 
-                'epsilon': None,# spectral control parameter
-                'n': 10,        # number of nodes
-                'sub_size': None,   # Number of sub-sampled nodes
-                'prob_T': 1.,   # Ratio of colored triangles
-                'true_prob_T': 1.,   # True ratio of colored triangles
-                'p_edges': 1.,  # Probability of edge existence
-                'seed': None,       ####
-                'option' : "One-shot-diffusion",        ####
-                'diff_order_sol' : 1,       ####
-                'diff_order_irr' : 1,       ####
-                'step_prog' : 1,        ####
-                'top_k_slepians' : 2        ####
-                }
-        
+            "P": None,  # Number of Kernels (Sub-dictionaries)
+            "J": None,  # Polynomial order
+            "K0": None,  # Sparsity level
+            "dictionary_type": None,
+            "c": None,  # spectral control parameter
+            "epsilon": None,  # spectral control parameter
+            "n": 10,  # number of nodes
+            "sub_size": None,  # Number of sub-sampled nodes
+            "true_prob_T": 1.0,  # True ratio of colored triangles
+            "prob_T": 1.0,  # The triangle probability with which we want to bias our topology
+            "p_edges": 1.0,  # Probability of edge existence
+            "seed": None,  ####
+            "option": "One-shot-diffusion",  ####
+            "diff_order_sol": 1,  ####
+            "diff_order_irr": 1,  ####
+            "step_prog": 1,  ####
+            "top_k_slepians": 2,  ####
+        }
+
         if args:
             if len(args) != 1 or not isinstance(args[0], dict):
-                raise ValueError("When using positional arguments, must provide a single dictionary")
+                raise ValueError(
+                    "When using positional arguments, must provide a single dictionary"
+                )
             params.update(args[0])
 
         params.update(kwargs)
@@ -119,52 +53,55 @@ class TspSolver:
         self.m_train: int = Y_train.shape[1]
         self.m_test: int = Y_test.shape[1]
 
-        # Topology and geometry behind data
-        self.G = EnhancedGraph(n=params['n'],
-                               p_edges=params['p_edges'], 
-                               p_triangles=params['prob_T'], 
-                               seed=params['seed']) 
+        # Topology and geometry behind data (by default we consider a topology with full upper laplacian)
+        self.G = EnhancedGraph(
+            n=params["n"],
+            p_edges=params["p_edges"],
+            p_triangles=params["prob_T"],
+            seed=params["seed"],
+        )
         # Incidence matrices
         self.B1: np.ndarray = self.G.get_b1()
         self.B2: np.ndarray = self.G.get_b2()
 
         # Sub-sampling if needed to decrease complexity
-        if params['sub_size'] != None:
-            self.B1 = self.B1[:, :params['sub_size']]
-            self.B2 = self.B2[:params['sub_size'], :]
-            self.B2 = self.B2[:,np.sum(np.abs(self.B2), 0) == 3]
-        
+        if params["sub_size"] != None:
+            self.B1 = self.B1[:, : params["sub_size"]]
+            self.B2 = self.B2[: params["sub_size"], :]
+            self.B2 = self.B2[:, np.sum(np.abs(self.B2), 0) == 3]
+
         # Topology dimensions and hyperparameters
         self.nu: int = self.B2.shape[1]
         self.nd: int = self.B1.shape[1]
-        self.true_prob_T = params['true_prob_T']
-        self.T: int = int(np.ceil(self.nu*(1-params['prob_T'])))
+        self.true_prob_T = params["true_prob_T"]
+        self.T: int = int(np.ceil(self.nu * (1 - self.true_prob_T)))
 
         # Laplacians according to the Hodge Theory for cell complexes
-        Lu, Ld, L = self.G.get_laplacians(sub_size=params['sub_size'])
-        self.Lu: np.ndarray = Lu                             # Ground-truth upper Laplacian
-        self.Ld: np.ndarray = Ld                             # Ground-truth lower Laplacian
-        self.L: np.ndarray = L                               # Ground-truth sum Laplacian
-        self.Lu_full: np.ndarray = self.G.get_laplacians(sub_size=params['sub_size'], 
-                                                    full=True)
-        self.M =  L.shape[0]
-        
+        Lu, Ld, L = self.G.get_laplacians(sub_size=params["sub_size"])
+        self.Lu: np.ndarray = Lu  # Upper Laplacian
+        self.Ld: np.ndarray = Ld  # Lower Laplacian
+        self.L: np.ndarray = L  # Sum Laplacian
+        self.M = L.shape[0]
 
         # Dictionary hyperparameters
-        self.P = params['P']                                 # Number of sub-dicts
-        self.J = params['J']                                 # Polynomial order for the Hodge Laplacian
-        self.c = params['c']                                 # Hyperparameter for stability in frequency domain
-        self.epsilon = params['epsilon']                     # Hyperparameter for stability in frequency domain
-        self.K0 = params['K0']                               # Assumed sparsity level
-        self.dictionary_type = params['dictionary_type']
+        self.P = params["P"]  # Number of sub-dicts
+        self.J = params["J"]  # Polynomial order for the Hodge Laplacian
+        self.c = params["c"]  # Hyperparameter for stability in frequency domain
+        self.epsilon = params[
+            "epsilon"
+        ]  # Hyperparameter for stability in frequency domain
+        self.K0 = params["K0"]  # Assumed sparsity level
+        self.dictionary_type = params["dictionary_type"]
         # Init optimal values for sparse representations and overcomplete dictionary
-        self.D_opt: np.ndarray = np.zeros((self.M, self.M*self.P))
+        self.D_opt: np.ndarray = np.zeros((self.M, self.M * self.P))
         self.X_opt_train: np.ndarray = np.zeros(self.X_train.shape)
         self.X_opt_test: np.ndarray = np.zeros(self.X_test.shape)
         # Init the learning errors and error curve (history)
         self.min_error_train = 1e20
         self.min_error_test = 1e20
-        self.history: List[np.ndarray] = []
+        self.train_history: List[np.ndarray] = []
+        self.test_history: List[np.ndarray] = []
+        self.opt_upper = self.nu
 
         ############################################################################################################
         ##                                                                                                        ##
@@ -173,27 +110,35 @@ class TspSolver:
         ############################################################################################################
 
         # Init the dictionary parameters according to the specific parameterization setup
-        if self.dictionary_type=="separated":
-            hs = np.zeros((self.P,self.J))
-            hi = np.zeros((self.P,self.J))
-            hh = np.zeros((self.P,1))
-            self.h_opt: List[np.ndarray] = [hh,hs,hi]
+        if self.dictionary_type == "separated":
+            hs = np.zeros((self.P, self.J))
+            hi = np.zeros((self.P, self.J))
+            hh = np.zeros((self.P, 1))
+            self.h_opt: List[np.ndarray] = [hh, hs, hi]
         else:
             h = np.zeros((self.P, self.J))
             hi = np.zeros((self.P, 1))
             self.h_opt: List[np.ndarray] = [hi, h]
 
-        # Compute the polynomial extension for the Laplacians and the auxiliary 
+        # Compute the polynomial extension for the Laplacians and the auxiliary
         # "pseudo-vandermonde" matrix for the constraints in the quadratic form
         if self.dictionary_type == "joint":
-            self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(self.L, self.J)
+            self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(
+                self.L, self.J
+            )
             self.B = compute_vandermonde(self.L, self.J).real
         elif self.dictionary_type == "edge_laplacian":
-            self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(self.Ld, self.J)
+            self.Lj, self.lambda_max_j, self.lambda_min_j = compute_Lj_and_lambdaj(
+                self.Ld, self.J
+            )
             self.B = compute_vandermonde(self.Ld, self.J).real
-        elif  self.dictionary_type == 'separated':
-            self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(self.Lu, self.J, separated=True)
-            self.Ldj, self.lambda_max_d_j, self.lambda_min_d_j = compute_Lj_and_lambdaj(self.Ld, self.J, separated=True)
+        elif self.dictionary_type == "separated":
+            self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(
+                self.Lu, self.J, separated=True
+            )
+            self.Ldj, self.lambda_max_d_j, self.lambda_min_d_j = compute_Lj_and_lambdaj(
+                self.Ld, self.J, separated=True
+            )
             self.Bu = compute_vandermonde(self.Lu, self.J).real
             self.Bd = compute_vandermonde(self.Ld, self.J)[:, 1:].real
             self.B = np.hstack([self.Bu, self.Bd])
@@ -201,47 +146,50 @@ class TspSolver:
         # Auxiliary matrix to define quadratic form dor the dictionary learning step
         self.P_aux: np.ndarray = None
         # Flag variable: the dictionary is learnable or analytic
-        self.dict_is_learnable = self.dictionary_type in ["separated", "joint", "edge_laplacian"]
+        self.dict_is_learnable = self.dictionary_type in [
+            "separated",
+            "joint",
+            "edge_laplacian",
+        ]
 
         # Auxiliary tools for the Slepians-based dictionary setup
-        if self.dictionary_type == 'slepians':
-            self.option = params['option']
-            self.diff_order_sol = params['diff_order_sol']
-            self.step_prog = params['step_prog']
-            self.diff_order_irr = params['diff_order_irr']
+        if self.dictionary_type == "slepians":
+            self.option = params["option"]
+            self.diff_order_sol = params["diff_order_sol"]
+            self.step_prog = params["step_prog"]
+            self.diff_order_irr = params["diff_order_irr"]
             self.source_sol = np.ones((self.nd,))
             self.source_irr = np.ones((self.nd,))
-            self.top_K_slepians = params['top_k_slepians']
-            self.spars_level = list(range(10,80,10))
+            self.top_K_slepians = params["top_k_slepians"]
+            self.spars_level = list(range(10, 80, 10))
             # Remember that this part should be updated if B2 or Lu are updated!
-            self.F_sol,self.F_irr = get_frequency_mask(self.B1,self.B2) # Get frequency bands
-            self.S_neigh, self.complete_coverage = cluster_on_neigh(self.B1,
-                                                                    self.B2,
-                                                                    self.diff_order_sol,
-                                                                    self.diff_order_irr,
-                                                                    self.source_sol,
-                                                                    self.source_irr,
-                                                                    self.option,
-                                                                    self.step_prog)
+            self.F_sol, self.F_irr = get_frequency_mask(
+                self.B1, self.B2
+            )  # Get frequency bands
+            self.S_neigh, self.complete_coverage = cluster_on_neigh(
+                self.B1,
+                self.B2,
+                self.diff_order_sol,
+                self.diff_order_irr,
+                self.source_sol,
+                self.source_irr,
+                self.option,
+                self.step_prog,
+            )
             self.R = [self.F_sol, self.F_irr]
             self.S = self.S_neigh
 
         # Auxiliary tools for the Wavelet-based dictionary setup
-        elif self.dictionary_type == 'wavelet':
+        elif self.dictionary_type == "wavelet":
             # Remember that this part should be updated if B2 or Lu are updated!
             self.w1 = np.linalg.eigvalsh(self.Lu)
             self.w2 = np.linalg.eigvalsh(self.Ld)
-            
-
-    # def fit(self) -> Tuple[float, List[np.ndarray], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    #     min_error_test, _, _, h_opt, X_opt_test, D_opt = self.learn_upper_laplacian()
-    #     return min_error_test, self.history, params['Lu'], h_opt, X_opt_test, D_opt
 
     def update_Lu(self, Lu_new):
         self.Lu = Lu_new
-        self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(self.Lu, 
-                                                                                    self.J, 
-                                                                                    separated=True)
+        self.Luj, self.lambda_max_u_j, self.lambda_min_u_j = compute_Lj_and_lambdaj(
+            self.Lu, self.J, separated=True
+        )
         self.Bu = compute_vandermonde(self.Lu, self.J).real
         self.B = np.hstack([self.Bu, self.Bd])
 
@@ -250,18 +198,20 @@ class TspSolver:
         is_okay = 0
         mult = 100
         tries = 0
-        while is_okay==0:
+        while is_okay == 0:
             is_okay = 1
-            h, c_try, _, tmp_sum_min, tmp_sum_max = generate_coeffs(arrays, P=P, mult=mult)
+            h, c_try, _, tmp_sum_min, tmp_sum_max = generate_coeffs(
+                arrays, P=P, mult=mult
+            )
             if c_try <= c:
                 is_okay *= 1
-            if tmp_sum_min > c-epsilon:
+            if tmp_sum_min > c - epsilon:
                 is_okay *= 1
                 incr_mult = 0
             else:
-                is_okay = is_okay*0
+                is_okay = is_okay * 0
                 incr_mult = 1
-            if tmp_sum_max < c+epsilon:
+            if tmp_sum_max < c + epsilon:
                 is_okay *= 1
                 decr_mult = 0
             else:
@@ -269,7 +219,7 @@ class TspSolver:
                 decr_mult = 1
             if is_okay == 0:
                 tries += 1
-            if tries >3:
+            if tries > 3:
                 discard = 1
                 break
             if incr_mult == 1:
@@ -278,9 +228,9 @@ class TspSolver:
                 mult /= 2
         return h, discard
 
-    def init_dict(self,
-                  h_prior: np.ndarray = None, 
-                  mode: str = "only_X") -> Tuple[np.ndarray, np.ndarray]:
+    def init_dict(
+        self, h_prior: np.ndarray = None, mode: str = "only_X"
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Initialize the dictionary and the signal sparse representation for the alternating
         optimization algorithm.
@@ -300,140 +250,84 @@ class TspSolver:
         Returns:
             Tuple[np.ndarray, np.ndarray, bool]: Initialized dictionary, initialized sparse representation, and discard flag value.
         """
-        
+
         # If no prior info on the dictionary
         if np.all(h_prior == None):
 
             # Init Dictionary
-            if (mode in ["all","only_D"]):
+            if mode in ["all", "only_D"]:
 
                 discard = 1
-                while discard==1:
+                while discard == 1:
 
                     if self.dictionary_type != "separated":
-                        h_prior, discard = self._multiplier_search(self.lambda_max_j, 
-                                                              self.lambda_min_j, 
-                                                              P=self.P, 
-                                                              c=self.c, 
-                                                              epsilon=self.epsilon)
-                        self.D_opt = generate_dictionary(h_prior, 
-                                                         self.P, 
-                                                         self.Lj)
+                        h_prior, discard = self._multiplier_search(
+                            self.lambda_max_j,
+                            self.lambda_min_j,
+                            P=self.P,
+                            c=self.c,
+                            epsilon=self.epsilon,
+                        )
+                        self.D_opt = generate_dictionary(h_prior, self.P, self.Lj)
 
                     else:
-                        h_prior, discard = self._multiplier_search(self.lambda_max_d_j, 
-                                                              self.lambda_min_d_j, 
-                                                              self.lambda_max_u_j, 
-                                                              self.lambda_min_u_j,
-                                                              P=self.P, 
-                                                              c=self.c, 
-                                                              epsilon=self.epsilon)
-                        self.D_opt = generate_dictionary(h_prior, 
-                                                         self.P, 
-                                                         self.Luj, 
-                                                         self.Ldj)
+                        h_prior, discard = self._multiplier_search(
+                            self.lambda_max_d_j,
+                            self.lambda_min_d_j,
+                            self.lambda_max_u_j,
+                            self.lambda_min_u_j,
+                            P=self.P,
+                            c=self.c,
+                            epsilon=self.epsilon,
+                        )
+                        self.D_opt = generate_dictionary(
+                            h_prior, self.P, self.Luj, self.Ldj
+                        )
 
             # Init Sparse Representations
-            if (mode in ["all","only_X"]):
-                
+            if mode in ["all", "only_X"]:
+
                 L = self.Ld if self.dictionary_type == "edge_laplacian" else self.L
                 _, Dx = sla.eig(L)
                 dd = la.norm(Dx, axis=0)
-                W = np.diag(1./dd)
-                Dx = Dx / la.norm(Dx)  
-                Domp = Dx@W
-                X = np.apply_along_axis(lambda x: get_omp_coeff(self.K0, Domp.real, x), axis=0, arr=self.Y_train)
-                X = np.tile(X, (self.P,1))
+                W = np.diag(1.0 / dd)
+                Dx = Dx / la.norm(Dx)
+                Domp = Dx @ W
+                X = np.apply_along_axis(
+                    lambda x: get_omp_coeff(self.K0, Domp.real, x),
+                    axis=0,
+                    arr=self.Y_train,
+                )
+                X = np.tile(X, (self.P, 1))
                 self.X_opt_train = X
 
         # Otherwise use prior info about the dictionary to initialize both the dictionary and the sparse representation
         else:
-            
+
             self.h_opt = h_prior
 
             if self.dictionary_type == "separated":
-                self.D_opt = generate_dictionary(h_prior, 
-                                                 self.P, 
-                                                 self.Luj, 
-                                                 self.Ldj)
-                self.X_opt_train = sparse_transform(self.D_opt, 
-                                                    self.K0, 
-                                                    self.Y_train)
-            else: 
-                self.D_opt = generate_dictionary(h_prior, 
-                                                 self.P, 
-                                                 self.Lj)
-                self.X_opt_train = sparse_transform(self.D_opt, 
-                                                    self.K0, 
-                                                    self.Y_train)             
+                self.D_opt = generate_dictionary(h_prior, self.P, self.Luj, self.Ldj)
+                self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_train)
+            else:
+                self.D_opt = generate_dictionary(h_prior, self.P, self.Lj)
+                self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_train)
 
-   
-    def save_results(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-
-            outputs = func(self, *args, **kwargs)
-            func_name = func.__name__
-
-            if func_name == "topological_dictionary_learn":
-
-                path = os.getcwd()
-                dir_path = os.path.join(path, 
-                                        'results', 
-                                        'dictionary_learning',
-                                        f'{self.dictionary_type}')
-                name = f'learn_D_{self.dictionary_type}'
-                filename = os.path.join(dir_path, f'{name}.pkl')
-                save_var = {"min_error_test": self.min_error_test,
-                            "min_error_train": self.min_error_train,
-                            "history": outputs[2],
-                            "h_opt": self.h_opt,
-                            "X_opt_test": self.X_opt_test,
-                            "X_opt_train": self.X_opt_train,
-                            "D_opt": self.D_opt}
-                
-            elif func_name == "learn_upper_laplacian":
-
-                path = os.getcwd()
-                dir_path = os.path.join(path, 'results', 'topology_learning')
-                name = f'learn_T{int(self.true_prob_T*100)}'
-                filename = os.path.join(dir_path, f'{name}.pkl')
-                save_var = {"min_error_test": self.min_error_test,
-                            "min_error_train": self.min_error_train,
-                            "history": self.history,
-                            "Lu_opt": self.Lu,
-                            "h_opt": self.h_opt,
-                            "X_opt_test": self.X_opt_test,
-                            "X_opt_train": self.X_opt_train,
-                            "D_opt": self.D_opt}
-
-            if not os.path.exists(dir_path):
-                os.makedirs(dir_path)
-
-            try:
-                with open(filename, 'wb') as file:
-                    pickle.dump(save_var, file)
-            except IOError as e:
-                print(f"An error occurred while writing the file: {e}")
-            except Exception as e:
-                print(f"An unexpected error occurred: {e}")
-
-            return outputs  
-        return wrapper
-
-    def topological_dictionary_learn(self,
-                                     lambda_: float = 1e-3, 
-                                     max_iter: int = 10, 
-                                     patience: int = 10,
-                                     tol: float = 1e-7,
-                                     step_h: float = 1.,
-                                     step_x: float = 1.,
-                                     solver: str ="MOSEK", 
-                                     verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    def topological_dictionary_learn(
+        self,
+        lambda_: float = 1e-3,
+        max_iter: int = 10,
+        patience: int = 10,
+        tol: float = 1e-7,
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        solver: str = "MOSEK",
+        verbose: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray, List[float]]:
         """
         Dictionary learning algorithm implementation for sparse representations of a signal on complex regular cellular.
         The algorithm consists of an iterative alternating optimization procedure defined in two steps: the positive semi-definite programming step
-        for obtaining the coefficients and dictionary based on Hodge theory, and the Orthogonal Matching Pursuit step for constructing 
+        for obtaining the coefficients and dictionary based on Hodge theory, and the Orthogonal Matching Pursuit step for constructing
         the K0-sparse solution from the dictionary found in the previous step, which best approximates the original signal.
         Args:
             Y_train (np.ndarray): Training data.
@@ -462,44 +356,51 @@ class TspSolver:
 
         # Define hyperparameters
         iter_, pat_iter = 1, 0
-        hist = []
+        train_hist = []
+        test_hist = []
 
         if self.dict_is_learnalbe:
 
-            # Init the dictionary and the sparse representation 
-            D_coll = [cp.Constant(self.D_opt[:,(self.M*i):(self.M*(i+1))]) for i in range(self.P)]
+            # Init the dictionary and the sparse representation
+            D_coll = [
+                cp.Constant(self.D_opt[:, (self.M * i) : (self.M * (i + 1))])
+                for i in range(self.P)
+            ]
             Dsum = cp.Constant(np.zeros((self.M, self.M)))
             h_opt = self.h_opt
             Y = cp.Constant(self.Y_train)
             X_tr = self.X_opt_train
             X_te = self.X_opt_test
             I = cp.Constant(np.eye(self.M))
-            
+
             while pat_iter < patience and iter_ <= max_iter:
-                
+
                 # SDP Step
                 X = cp.Constant(X_tr)
                 if iter_ != 1:
-                    D_coll = [cp.Constant(D[:,(self.M*i):(self.M*(i+1))]) for i in range(self.P)]
+                    D_coll = [
+                        cp.Constant(D[:, (self.M * i) : (self.M * (i + 1))])
+                        for i in range(self.P)
+                    ]
                     Dsum = cp.Constant(np.zeros((self.M, self.M)))
-                
+
                 # Define the objective function
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
                     # Init the variables
                     h = cp.Variable((self.P, self.J))
                     hI = cp.Variable((self.P, 1))
                     h.value, hI.value = h_opt
-                    for i in range(0,self.P):
-                        tmp =  cp.Constant(np.zeros((self.M, self.M)))
-                        for j in range(0,self.J):
-                            tmp += (cp.Constant(self.Lj[j, :, :]) * h[i,j])
-                        tmp += (I*hI[i])
+                    for i in range(0, self.P):
+                        tmp = cp.Constant(np.zeros((self.M, self.M)))
+                        for j in range(0, self.J):
+                            tmp += cp.Constant(self.Lj[j, :, :]) * h[i, j]
+                        tmp += I * hI[i]
                         D_coll[i] = tmp
                         Dsum += tmp
-                    D = cp.hstack([D_coll[i]for i in range(self.P)])
-                    term1 = cp.square(cp.norm((Y - D @ X), 'fro'))
-                    term2 = cp.square(cp.norm(h, 'fro')*lambda_)
-                    term3 = cp.square(cp.norm(hI, 'fro')*lambda_)
+                    D = cp.hstack([D_coll[i] for i in range(self.P)])
+                    term1 = cp.square(cp.norm((Y - D @ X), "fro"))
+                    term2 = cp.square(cp.norm(h, "fro") * lambda_)
+                    term3 = cp.square(cp.norm(hI, "fro") * lambda_)
                     obj = cp.Minimize(term1 + term2 + term3)
 
                 else:
@@ -507,58 +408,79 @@ class TspSolver:
                     hI = cp.Variable((self.P, self.J))
                     hS = cp.Variable((self.P, self.J))
                     hH = cp.Variable((self.P, 1))
-                    hH.value, hS.value, hI.value = h_opt ##################### OCCHIO
-                    for i in range(0,self.P):
-                        tmp =  cp.Constant(np.zeros((self.M, self.M)))
-                        for j in range(0,self.J):
-                            tmp += ((cp.Constant(self.Luj[j, :, :])*hS[i,j]) + (cp.Constant(self.Ldj[j, :, :])*hI[i,j]))
-                        tmp += (I*hH[i])
+                    hH.value, hS.value, hI.value = h_opt
+                    for i in range(0, self.P):
+                        tmp = cp.Constant(np.zeros((self.M, self.M)))
+                        for j in range(0, self.J):
+                            tmp += (cp.Constant(self.Luj[j, :, :]) * hS[i, j]) + (
+                                cp.Constant(self.Ldj[j, :, :]) * hI[i, j]
+                            )
+                        tmp += I * hH[i]
                         D_coll[i] = tmp
                         Dsum += tmp
                     D = cp.hstack([D_coll[i] for i in range(self.P)])
-        
-                    term1 = cp.square(cp.norm((Y - D @ X), 'fro'))
-                    term2 = cp.square(cp.norm(hI, 'fro')*lambda_)
-                    term3 = cp.square(cp.norm(hS, 'fro')*lambda_)
-                    term4 = cp.square(cp.norm(hH, 'fro')*lambda_)
+
+                    term1 = cp.square(cp.norm((Y - D @ X), "fro"))
+                    term2 = cp.square(cp.norm(hI, "fro") * lambda_)
+                    term3 = cp.square(cp.norm(hS, "fro") * lambda_)
+                    term4 = cp.square(cp.norm(hH, "fro") * lambda_)
                     obj = cp.Minimize(term1 + term2 + term3 + term4)
 
                 # Define the constraints
-                constraints = [D_coll[i] >> 0 for i in range(self.P)] + \
-                                [(cp.multiply(self.c, I) - D_coll[i]) >> 0 for i in range(self.P)] + \
-                                [(Dsum - cp.multiply((self.c - self.epsilon), I)) >> 0, (cp.multiply((self.c + self.epsilon), I) - Dsum) >> 0]
+                constraints = (
+                    [D_coll[i] >> 0 for i in range(self.P)]
+                    + [(cp.multiply(self.c, I) - D_coll[i]) >> 0 for i in range(self.P)]
+                    + [
+                        (Dsum - cp.multiply((self.c - self.epsilon), I)) >> 0,
+                        (cp.multiply((self.c + self.epsilon), I) - Dsum) >> 0,
+                    ]
+                )
 
                 prob = cp.Problem(obj, constraints)
-                prob.solve(solver=eval(f'cp.{solver}'), verbose=False)
+                prob.solve(solver=eval(f"cp.{solver}"), verbose=False)
 
                 # Dictionary Update
                 D = D.value
                 if self.dictionary_type in ["joint", "edge_laplacian"]:
-                    h_opt = [h_opt[0] + step_h*(h.value - h_opt[0]),
-                             h_opt[1] + step_h*(hI.value - h_opt[1])]
+                    h_opt = [
+                        h_opt[0] + step_h * (h.value - h_opt[0]),
+                        h_opt[1] + step_h * (hI.value - h_opt[1]),
+                    ]
                 else:
-                    h_opt = [h_opt[0] + step_h*(hH.value-h_opt[0]),
-                             h_opt[1] + step_h*(hS.value-h_opt[1]), 
-                             h_opt[2] + step_h*(hI.value-h_opt[2])]
+                    h_opt = [
+                        h_opt[0] + step_h * (hH.value - h_opt[0]),
+                        h_opt[1] + step_h * (hS.value - h_opt[1]),
+                        h_opt[2] + step_h * (hI.value - h_opt[2]),
+                    ]
 
                 # OMP Step
-                X_te_tmp, X_tr_tmp = sparse_transform(D, self.K0, self.Y_test, self.Y_train)
+                X_te_tmp, X_tr_tmp = sparse_transform(
+                    D, self.K0, self.Y_test, self.Y_train
+                )
                 # Sparse Representation Update
-                X_tr = X_tr + step_x*(X_tr_tmp - X_tr)
-                X_te = X_te + step_x*(X_te_tmp - X_te)
+                X_tr = X_tr + step_x * (X_tr_tmp - X_tr)
+                X_te = X_te + step_x * (X_te_tmp - X_te)
 
                 # Error Update
                 error_train = nmse(D, X_tr, self.Y_train, self.m_train)
                 error_test = nmse(D, X_te, self.Y_test, self.m_test)
+                train_hist.append(error_train)
+                test_hist.append(error_test)
 
-                hist.append(error_test)
-                
                 # Error Storing
-                if (error_train < self.min_error_train) and (abs(error_train) > np.finfo(float).eps) and (abs(error_train - self.min_error_train) > tol):
+                if (
+                    (error_train < self.min_error_train)
+                    and (abs(error_train) > np.finfo(float).eps)
+                    and (abs(error_train - self.min_error_train) > tol)
+                ):
                     self.X_opt_train = X_tr
                     self.min_error_train = error_train
 
-                if (error_test < self.min_error_test) and (abs(error_test) > np.finfo(float).eps) and (abs(error_test - self.min_error_test) > tol):
+                if (
+                    (error_test < self.min_error_test)
+                    and (abs(error_test) > np.finfo(float).eps)
+                    and (abs(error_test - self.min_error_test) > tol)
+                ):
                     self.h_opt = h_opt
                     self.D_opt = D
                     self.X_opt_test = X_te
@@ -571,89 +493,106 @@ class TspSolver:
                     pat_iter += 1
 
                 iter_ += 1
-        
+
         else:
 
             # Fourier Dictionary Benchmark
             _, self.D_opt = sla.eigh(self.L)
-            self.X_opt_test, self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_test, self.Y_train)
+            self.X_opt_test, self.X_opt_train = sparse_transform(
+                self.D_opt, self.K0, self.Y_test, self.Y_train
+            )
 
             # Error Updating
-            self.min_error_train = nmse(self.D_opt, self.X_opt_train, self.Y_train, self.m_train)
-            self.min_error_test= nmse(self.D_opt, self.X_opt_test, self.Y_test, self.m_test)
-            
-        return self.min_error_test, self.min_error_train, hist
-    
+            self.min_error_train = nmse(
+                self.D_opt, self.X_opt_train, self.Y_train, self.m_train
+            )
+            self.min_error_test = nmse(
+                self.D_opt, self.X_opt_test, self.Y_test, self.m_test
+            )
+
+            train_hist.append(error_train)
+            test_hist.append(error_test)
+
+        return self.min_error_test, self.min_error_train, train_hist, test_hist
 
     def _aux_matrix_update(self, X):
 
         I = [np.eye(self.M)]
-        if self.dictionary_type=="separated":
+        if self.dictionary_type == "separated":
             LLu = [lu for lu in self.Luj]
             LLd = [ld for ld in self.Ldj]
-            LL = np.array(I+LLu+LLd)
+            LL = np.array(I + LLu + LLd)
         else:
             LL = [l for l in self.Lj]
             LL = np.array(I + LL)
 
-        P_aux = np.array([LL@X[(i*self.M): ((i+1)*self.M), :] for i in range(self.P)])
-        self.P_aux = rearrange(P_aux, 'b h w c -> (b h) w c')
-    
-    def topological_dictionary_learn_qp(self,
-                                        lambda_: float = 1e-3, 
-                                        max_iter: int = 10, 
-                                        patience: int = 10,
-                                        tol: float = 1e-7,
-                                        solver: str = 'GUROBI',
-                                        step_h: float = 1.,
-                                        step_x: float = 1.,
-                                        verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, List[float]]:
-        
+        P_aux = np.array(
+            [LL @ X[(i * self.M) : ((i + 1) * self.M), :] for i in range(self.P)]
+        )
+        self.P_aux = rearrange(P_aux, "b h w c -> (b h) w c")
+
+    def topological_dictionary_learn_qp(
+        self,
+        lambda_: float = 1e-3,
+        max_iter: int = 10,
+        patience: int = 10,
+        tol: float = 1e-7,
+        solver: str = "GUROBI",
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        verbose: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+
         # Define hyperparameters
         iter_, pat_iter = 1, 0
-        hist = []
+        train_hist = []
+        test_hist = []
 
-        # Learnable Dictionary -> ADMM optimization algorithm
+        # Learnable Dictionary -> alternating-direction optimization algorithm
         if self.dict_is_learnable:
-            
+
             # Init the the sparse representation
-            h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1,1)
+            h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1, 1)
             X_tr = self.X_opt_train
             X_te = self.X_opt_test
             f = 2 if self.dictionary_type == "separated" else 1
-            reg = lambda_ * np.eye(self.P*(f*self.J+1))
+            reg = lambda_ * np.eye(self.P * (f * self.J + 1))
             I_s = cp.Constant(np.eye(self.P))
-            i_s = cp.Constant(np.ones((self.P,1)))
+            i_s = cp.Constant(np.ones((self.P, 1)))
             B = cp.Constant(self.B)
 
             while pat_iter < patience and iter_ <= max_iter:
 
                 # Init variables and parameters
-                h = cp.Variable((self.P*(f*self.J+1), 1)) 
+                h = cp.Variable((self.P * (f * self.J + 1), 1))
                 self._aux_matrix_update(X_tr)
                 h.value = h_opt
 
-                Q = cp.Constant(np.einsum('imn, lmn -> il', self.P_aux, self.P_aux) + reg)
-                l = cp.Constant(np.einsum('mn, imn -> i', self.Y_train, self.P_aux))
+                Q = cp.Constant(
+                    np.einsum("imn, lmn -> il", self.P_aux, self.P_aux) + reg
+                )
+                l = cp.Constant(np.einsum("mn, imn -> i", self.Y_train, self.P_aux))
 
                 # Quadratic term
-                term2 = cp.quad_form(h, Q, assume_PSD = True)
+                term2 = cp.quad_form(h, Q, assume_PSD=True)
                 # Linear term
-                term1 = l@h
+                term1 = l @ h
                 term1 = cp.multiply(-2, term1)[0]
-                
-                obj = cp.Minimize(term2+term1)
+
+                obj = cp.Minimize(term2 + term1)
 
                 # Define the constraints
-                cons1 = cp.kron(I_s, B)@h
-                cons2 = cp.kron(i_s.T, B)@h
-                constraints = [cons1 >= 0] + \
-                                [cons1 <= self.c] + \
-                                [cons2 >= (self.c - self.epsilon)] + \
-                                [cons2 <= (self.c + self.epsilon)]
+                cons1 = cp.kron(I_s, B) @ h
+                cons2 = cp.kron(i_s.T, B) @ h
+                constraints = (
+                    [cons1 >= 0]
+                    + [cons1 <= self.c]
+                    + [cons2 >= (self.c - self.epsilon)]
+                    + [cons2 <= (self.c + self.epsilon)]
+                )
 
                 prob = cp.Problem(obj, constraints)
-                prob.solve(solver=eval(f'cp.{solver}'), verbose=False)
+                prob.solve(solver=eval(f"cp.{solver}"), verbose=False)
 
                 # Update the dictionary
 
@@ -661,34 +600,46 @@ class TspSolver:
                     h_tmp = _split_coeffs(h, self.P, self.J)
                     # print(h_tmp.shape)
                     # h_tmp = h.value.reshape(self.P, self.J+1)
-                    D = generate_dictionary(h_tmp, self.P, self.Lj)                      
-                    h_opt = h_opt + step_h*(h.value - h_opt)
+                    D = generate_dictionary(h_tmp, self.P, self.Lj)
+                    h_opt = h_opt + step_h * (h.value - h_opt)
                 else:
 
                     h_list = _split_coeffs(h, self.P, self.J, sep=True)
-                    D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)                                
-                    h_opt = h_opt + step_h*(h.value - h_opt)
-
+                    D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)
+                    h_opt = h_opt + step_h * (h.value - h_opt)
 
                 # OMP Step
-                X_te_tmp, X_tr_tmp = sparse_transform(D, self.K0, self.Y_test, self.Y_train)
+                X_te_tmp, X_tr_tmp = sparse_transform(
+                    D, self.K0, self.Y_test, self.Y_train
+                )
                 # Sparse Representation Update
-                X_tr = X_tr + step_x*(X_tr_tmp - X_tr)
-                X_te = X_te + step_x*(X_te_tmp - X_te)
+                X_tr = X_tr + step_x * (X_tr_tmp - X_tr)
+                X_te = X_te + step_x * (X_te_tmp - X_te)
 
                 # Error Update
                 error_train = nmse(D, X_tr, self.Y_train, self.m_train)
                 error_test = nmse(D, X_te, self.Y_test, self.m_test)
 
-                hist.append(error_test)
-                
+                train_hist.append(error_train)
+                test_hist.append(error_test)
+
                 # Error Storing
-                if (error_train < self.min_error_train) and (abs(error_train) > np.finfo(float).eps) and (abs(error_train - self.min_error_train) > tol):
+                if (
+                    (error_train < self.min_error_train)
+                    and (abs(error_train) > np.finfo(float).eps)
+                    and (abs(error_train - self.min_error_train) > tol)
+                ):
                     self.X_opt_train = X_tr
                     self.min_error_train = error_train
 
-                if (error_test < self.min_error_test) and (abs(error_test) > np.finfo(float).eps) and (abs(error_test - self.min_error_test) > tol):
-                    self.h_opt = h_list if self.dictionary_type == 'separated' else h_opt
+                if (
+                    (error_test < self.min_error_test)
+                    and (abs(error_test) > np.finfo(float).eps)
+                    and (abs(error_test - self.min_error_test) > tol)
+                ):
+                    self.h_opt = (
+                        h_list if self.dictionary_type == "separated" else h_opt
+                    )
                     self.D_opt = D
                     self.X_opt_test = X_te
                     self.min_error_test = error_test
@@ -700,175 +651,362 @@ class TspSolver:
                     pat_iter += 1
 
                 iter_ += 1
-        
+
         # Analytic Dictionary -> directly go to OMP step
         else:
-            
+
             if self.dictionary_type == "fourier":
                 # Fourier Dictionary Benchmark
                 _, self.D_opt = sla.eigh(self.L)
 
             elif self.dictionary_type == "slepians":
-                SS = SimplicianSlepians(self.B1, 
-                                        self.B2, 
-                                        self.S, 
-                                        self.R,
-                                        verbose=False, 
-                                        top_K = self.top_K_slepians)
+                SS = SimplicianSlepians(
+                    self.B1,
+                    self.B2,
+                    self.S,
+                    self.R,
+                    verbose=False,
+                    top_K=self.top_K_slepians,
+                )
                 self.D_opt = SS.atoms_flat
-                
 
             elif self.dictionary_type == "wavelet":
-                SH = SeparateHodgelet(self.B1, 
-                                      self.B2,
-                                      *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w1))),
-                                      *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w2))))
+                SH = SeparateHodgelet(
+                    self.B1,
+                    self.B2,
+                    *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w1))),
+                    *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w2))),
+                )
                 self.D_opt = SH.atoms_flat
                 # print(self.D_opt.shape)
-            
-            # OMP
-            self.X_opt_test, self.X_opt_train = sparse_transform(self.D_opt, self.K0, self.Y_test, self.Y_train)
-            # Error Updating
-            self.min_error_train = nmse(self.D_opt, self.X_opt_train, self.Y_train, self.m_train)
-            self.min_error_test= nmse(self.D_opt, self.X_opt_test, self.Y_test, self.m_test)
 
-        return self.min_error_test, self.min_error_train, hist
-    
-    @save_results
-    def learn_upper_laplacian(self,
-                              Lu_new: np.ndarray = None,
-                              filter: np.ndarray = 1,
-                              h_prior: np.ndarray = None,
-                              lambda_: float = 1e-3, 
-                              max_iter: int = 10, 
-                              patience: int = 10,
-                              tol: float = 1e-7,
-                              step_h: float = 1.,
-                              step_x: float = 1.,
-                              mode: str = "optimistic",
-                              verbose: bool = False,
-                              warmup: int = 0,
-                              QP=False,
-                              cont=False):
-    
-        assert step_h<1 or step_h>0, "You must provide a step-size between 0 and 1."
-        assert step_x<1 or step_x>0, "You must provide a step-size between 0 and 1."
-        assert (mode=="optimistic") or (mode=="pessimistic"), f'{mode} is not a legal mode: \"optimistic\" or \"pessimistic\" are the only ones allowed.'
-        
+            # OMP
+            self.X_opt_test, self.X_opt_train = sparse_transform(
+                self.D_opt, self.K0, self.Y_test, self.Y_train
+            )
+            # Error Updating
+            self.min_error_train = nmse(
+                self.D_opt, self.X_opt_train, self.Y_train, self.m_train
+            )
+            self.min_error_test = nmse(
+                self.D_opt, self.X_opt_test, self.Y_test, self.m_test
+            )
+
+            train_hist.append(self.min_error_train)
+            test_hist.append(self.min_error_test)
+
+        return self.min_error_test, self.min_error_train, train_hist, test_hist
+
+    def learn_upper_laplacian(
+        self,
+        Lu_new: np.ndarray = None,
+        filter: np.ndarray = 1,
+        h_prior: np.ndarray = None,
+        lambda_: float = 1e-3,
+        max_iter: int = 10,
+        patience: int = 10,
+        tol: float = 1e-7,
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        mode: str = "optimistic",
+        verbose: bool = False,
+        warmup: int = 0,
+        QP=False,
+    ):
+
+        assert step_h < 1 or step_h > 0, "You must provide a step-size between 0 and 1."
+        assert step_x < 1 or step_x > 0, "You must provide a step-size between 0 and 1."
+        assert (mode == "optimistic") or (
+            mode == "pessimistic"
+        ), f'{mode} is not a legal mode: "optimistic" or "pessimistic" are the only ones allowed.'
+
         # Check if we are executing the first recursive iteration
         if np.all(Lu_new == None):
             T = self.B2.shape[1]
-            if mode=="optimistic":
+            if mode == "optimistic":
+                self.opt_upper = self.nu
                 filter = np.ones(T)
-                self.warmup=0  
-            else:
+                self.warmup = 0
+            elif mode == "pessimistic":
+                self.opt_upper = 0
                 filter = np.zeros(T)
-                self.update_Lu(np.zeros(self.Lu.shape)) # start with an "empty" upper Laplacian
+                self.update_Lu(
+                    np.zeros(self.Lu.shape)
+                )  # start with an "empty" upper Laplacian
                 self.warmup = warmup
         else:
             self.update_Lu(Lu_new)
 
-        self.init_dict(h_prior=h_prior,
-                       mode="only_X")
+        self.init_dict(h_prior=h_prior, mode="only_X")
 
         if QP:
-            _, _, hist = self.topological_dictionary_learn_qp(lambda_=lambda_,
-                                                            max_iter=max_iter,
-                                                            patience=patience,
-                                                            tol=tol,
-                                                            step_h=step_h,
-                                                            step_x=step_x,
-                                                            solver='GUROBI')
+            _, _, train_hist, test_hist = self.topological_dictionary_learn_qp(
+                lambda_=lambda_,
+                max_iter=max_iter,
+                patience=patience,
+                tol=tol,
+                step_h=step_h,
+                step_x=step_x,
+                solver="GUROBI",
+            )
         else:
-            _, _, hist = self.topological_dictionary_learn(lambda_=lambda_,
-                                                            max_iter=max_iter,
-                                                            patience=patience,
-                                                            tol=tol,
-                                                            step_h=step_h,
-                                                            step_x=step_x)
-                        
-        self.history.append(hist)
-        search_space = np.where(filter == 1) if mode=="optimistic" else np.where(filter == 0)   
+            _, _, train_hist, test_hist = self.topological_dictionary_learn(
+                lambda_=lambda_,
+                max_iter=max_iter,
+                patience=patience,
+                tol=tol,
+                step_h=step_h,
+                step_x=step_x,
+            )
+
+        self.train_history.append(train_hist)
+        self.test_history.append(test_hist)
+
+        search_space = (
+            np.where(filter == 1) if mode == "optimistic" else np.where(filter == 0)
+        )
         sigmas = pd.DataFrame({"idx": search_space[0]})
 
         sigmas["sigma"] = sigmas.idx.apply(lambda _: filter)
-        if mode=="optimistic":
+        if mode == "optimistic":
             sigmas["sigma"] = sigmas.apply(lambda x: _indicator_matrix(x), axis=1)
         else:
             sigmas["sigma"] = sigmas.apply(lambda x: _indicator_matrix_rev(x), axis=1)
         sigmas["Luj"] = sigmas.apply(lambda x: _compute_Luj(x, self.B2, self.J), axis=1)
-        sigmas["D"] = sigmas.apply(lambda x: generate_dictionary(self.h_opt, self.P, x.Luj, self.Ldj), axis=1)
-        sigmas["X"] = sigmas.D.apply(lambda x: sparse_transform(x, self.K0, self.Y_test))
-        sigmas["NMSE"] = sigmas.apply(lambda x: nmse(x.D, x.X, self.Y_test, self.m_test), axis=1)
-        
-        if self.warmup>0:
+        sigmas["D"] = sigmas.apply(
+            lambda x: generate_dictionary(self.h_opt, self.P, x.Luj, self.Ldj), axis=1
+        )
+        sigmas["X"] = sigmas.D.apply(
+            lambda x: sparse_transform(x, self.K0, self.Y_train)
+        )
+        sigmas["NMSE"] = sigmas.apply(
+            lambda x: nmse(x.D, x.X, self.Y_train, self.m_train), axis=1
+        )
+
+        if self.warmup > 0:
             candidate_error = sigmas.NMSE.min() - np.finfo(float).eps
-            self.warmup-=1
+            self.warmup -= 1
         else:
             candidate_error = sigmas.NMSE.min()
         idx_min = sigmas.NMSE.idxmin()
 
-        
-        if candidate_error < self.min_error_test:
+        if candidate_error < self.min_error_train:
             S = sigmas.sigma[idx_min]
             Lu_new = self.B2 @ S @ self.B2.T
             filter = np.diagonal(S)
 
+            if mode == "optimistic":
+                self.opt_upper -= 1
+            else:
+                self.opt_upper += 1
+
             if verbose:
-                if mode=="optimistic":
-                    print(f'Removing 1 triangle from topology... \n ... New min test error: {candidate_error} !')
+                if mode == "optimistic":
+                    print(
+                        f"Removing {self.T - self.opt_upper} triangles from topology... \n ... The min training error: {candidate_error:.3f} !"
+                    )
                 else:
-                    print(f'Adding 1 triangle to topology... \n ... New min test error: {candidate_error} !')
+                    print(
+                        f"Adding {self.T - self.opt_upper} triangles to topology... \n ... The min training error: {candidate_error:.3f} !"
+                    )
 
-            return self.learn_upper_laplacian(h_prior=self.h_opt,
-                                              Lu_new=Lu_new,
-                                              filter=filter,
-                                              lambda_=lambda_,
-                                              max_iter=max_iter,
-                                              patience=patience,
-                                              tol=tol,
-                                              step_h=step_h,
-                                              step_x=step_x,
-                                              mode=mode,
-                                              verbose=verbose,
-                                              QP=QP,
-                                              cont=cont)
-        
-        # For the last recursions of "pessimistic" mode try some recursion of the "optimistic"
-        # to remove the warm-up randomly-added triangles
-        if mode == "pessimistic" and not cont:
-            return  self.learn_upper_laplacian(h_prior=self.h_opt,
-                                              Lu_new=Lu_new,
-                                              filter=filter,
-                                              lambda_=lambda_,
-                                              max_iter=max_iter,
-                                              patience=patience,
-                                              tol=tol,
-                                              step_h=step_h,
-                                              step_x=step_x,
-                                              mode="optimistic",
-                                              verbose=verbose,
-                                              QP=QP,
-                                              cont=True)
-        
-        # Then after we added triangles and removed the randomly added ones, continue adding!
-        elif mode != "pessimistic" and cont:
+            return self.learn_upper_laplacian(
+                h_prior=self.h_opt,
+                Lu_new=Lu_new,
+                filter=filter,
+                lambda_=lambda_,
+                max_iter=max_iter,
+                patience=patience,
+                tol=tol,
+                step_h=step_h,
+                step_x=step_x,
+                mode=mode,
+                verbose=verbose,
+                QP=QP,
+            )
 
-            print("Ce provo!")
-            return  self.learn_upper_laplacian(h_prior=self.h_opt,
-                                              Lu_new=Lu_new,
-                                              filter=filter,
-                                              lambda_=lambda_,
-                                              max_iter=max_iter,
-                                              patience=patience,
-                                              tol=tol,
-                                              step_h=step_h,
-                                              step_x=step_x,
-                                              mode="pessimistic",
-                                              verbose=verbose,
-                                              QP=QP,
-                                              cont=cont,
-                                              warmup=warmup)  
-                  
-        self.B2 = self.B2@np.diag(filter)
-        return self.min_error_test, self.history, self.Lu, self.B2
+        self.B2 = self.B2 @ np.diag(filter)
+        return (
+            self.min_error_train,
+            self.min_error_test,
+            self.train_history,
+            self.test_history,
+            self.Lu,
+            self.B2,
+        )
+
+    def save_results(func):
+        """Decorator to save intermediate results when testing learning functions"""
+
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+
+            outputs = func(self, *args, **kwargs)
+            func_name = func.__name__
+
+            if func_name == "test_topological_dictionary_learn":
+
+                path = os.getcwd()
+                dir_path = os.path.join(
+                    path, "results", "dictionary_learning", f"{self.dictionary_type}"
+                )
+                name = f"learn_D_{self.dictionary_type}"
+                filename = os.path.join(dir_path, f"{name}.pkl")
+                save_var = {
+                    "min_error_test": self.min_error_test,
+                    "min_error_train": self.min_error_train,
+                    "train_history": outputs[2],
+                    "test_history": outputs[3],
+                    "h_opt": self.h_opt,
+                    "X_opt_test": self.X_opt_test,
+                    "X_opt_train": self.X_opt_train,
+                    "D_opt": self.D_opt,
+                }
+
+            elif func_name == "test_topological_dictionary_learn_qp":
+
+                path = os.getcwd()
+                dir_path = os.path.join(path, "results", "no_topology_learning")
+                name = f"learn_T{int(self.true_prob_T*100)}"
+                filename = os.path.join(dir_path, f"{name}.pkl")
+                save_var = {
+                    "min_error_test": self.min_error_test,
+                    "min_error_train": self.min_error_train,
+                    "train_history": outputs[2],
+                    "test_history": outputs[3],
+                    "h_opt": self.h_opt,
+                    "X_opt_test": self.X_opt_test,
+                    "X_opt_train": self.X_opt_train,
+                    "D_opt": self.D_opt,
+                }
+
+            elif func_name == "test_learn_upper_laplacian":
+
+                path = os.getcwd()
+                dir_path = os.path.join(path, "results", "topology_learning")
+                name = f"learn_T{int(self.true_prob_T*100)}"
+                filename = os.path.join(dir_path, f"{name}.pkl")
+                save_var = {
+                    "min_error_test": self.min_error_test,
+                    "min_error_train": self.min_error_train,
+                    "history": self.history,
+                    "Lu_opt": self.Lu,
+                    "B2_opt": self.B2,
+                    "h_opt": self.h_opt,
+                    "X_opt_test": self.X_opt_test,
+                    "X_opt_train": self.X_opt_train,
+                    "D_opt": self.D_opt,
+                }
+
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path)
+
+            try:
+                with open(filename, "wb") as file:
+                    pickle.dump(save_var, file)
+            except IOError as e:
+                print(f"An error occurred while writing the file: {e}")
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+
+            return outputs
+
+        return wrapper
+
+    @save_results
+    def test_topological_dictionary_learn(
+        self,
+        lambda_: float = 1e-7,
+        max_iter: int = 100,
+        patience: int = 5,
+        tol: float = 1e-7,
+        solver: str = "MOSEK",
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        verbose: bool = False,
+    ) -> None:
+
+        self.topological_dictionary_learn(
+            lambda_, max_iter, patience, tol, solver, step_h, step_x, verbose
+        )
+
+    @save_results
+    def test_topological_dictionary_learn_qp(
+        self,
+        lambda_: float = 1e-7,
+        max_iter: int = 100,
+        patience: int = 5,
+        tol: float = 1e-7,
+        solver: str = "GUROBI",
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        verbose: bool = False,
+    ) -> None:
+
+        self.topological_dictionary_learn_qp(
+            lambda_, max_iter, patience, tol, solver, step_h, step_x, verbose
+        )
+
+    @save_results
+    def test_learn_upper_laplacian(
+        self,
+        lambda_: float = 1e-7,
+        max_iter: int = 100,
+        patience: int = 5,
+        tol: float = 1e-7,
+        step_h: float = 1.0,
+        step_x: float = 1.0,
+        mode: str = "optimistic",
+        verbose: bool = True,
+        warmup: int = 0,
+        QP: bool = True,
+    ) -> None:
+
+        self.learn_upper_laplacian(
+            lambda_, max_iter, patience, tol, step_h, step_x, mode, verbose, warmup, QP
+        )
+
+    def get_topology_approx_error(self, Lu_true):
+        return np.linalg.norm(Lu_true - self.Lu, ord="fro")
+
+    def fit(self, algo_type, Lu_true, **hyperparams):
+
+        hp = {
+            "lambda_": 1e-3,
+            "tol": 1e-7,
+            "patience": 10,
+            "max_iter": 10,
+            "step_x": 1.0,
+            "step_h": 1.0,
+            "QP": True,
+            "mode": "optimistic",
+            "verbose": False,
+        }
+
+        hp.update(hyperparams)
+
+        if algo_type == "comp":
+            self.learn_upper_laplacian(
+                lambda_=hp["lambda_"],
+                max_iter=hp["max_iter"],
+                patience=hp["patience"],
+                tol=hp["tol"],
+                step_h=hp["step_h"],
+                step_x=hp["step_x"],
+                QP=hp["QP"],
+            )
+
+        else:
+            self.topological_dictionary_learn_qp(
+                lambda_=hp["lambda_"],
+                max_iter=hp["max_iter"],
+                patience=hp["patience"],
+                tol=hp["tol"],
+                step_h=hp["step_h"],
+                step_x=hp["step_x"],
+                solver="GUROBI",
+            )
+
+        Lu_approx_error = self.get_topology_approx_error(Lu_true=Lu_true)
+
+        return self.min_error_train, self.min_error_test, Lu_approx_error

@@ -2,21 +2,22 @@ import numpy as np
 import networkx as nx
 from numpy.linalg import matrix_rank
 from scipy.linalg import qr
-from .tsp_utils import memoize
+from .utils import memoize
+
 
 class EnhancedGraph(nx.Graph):
-    def __init__(self, n=10, p_edges=1., p_triangles=1., seed=None, *args, **kwargs):
-        '''
+    def __init__(self, n=10, p_edges=1.0, p_triangles=1.0, seed=None, *args, **kwargs):
+        """
         EnhancedGraph constructor that can generate an Erdős-Rényi graph.
 
         Parameters:
         - n (int): The number of nodes.
         - p (float): Probability for edge creation.
         - *args, **kwargs: Additional arguments passed to the nx.Graph constructor.
-        '''
+        """
 
         super().__init__(*args, **kwargs)
-        self.id = f'{seed}_{n}_{p_edges}'
+        self.id = f"{seed}_{n}_{p_edges}"
         self.p_triangles = p_triangles
         er_graph = nx.erdos_renyi_graph(n, p_edges, seed=seed)
         self.add_nodes_from(er_graph.nodes(data=True))
@@ -30,15 +31,15 @@ class EnhancedGraph(nx.Graph):
 
     @memoize()
     def get_b1(self):
-        '''
+        """
         Compute the oriented incidence matrix of the graph.
-        '''
+        """
         return (-1) * nx.incidence_matrix(self, oriented=True).todense()
 
     def get_cycles(self, max_len=np.inf):
-        '''
+        """
         Find all cycles in the graph within a specified maximum length.
-        '''
+        """
 
         A = self.get_adjacency()
         G = nx.DiGraph(A)
@@ -58,9 +59,9 @@ class EnhancedGraph(nx.Graph):
 
     @memoize()
     def get_b2(self):
-        '''
+        """
         Compute an edge-triangle incidence matrix with QR decomposition and rank considerations.
-        '''
+        """
         E_list = list(self.edges)
         All_P = self.get_cycles()
         cycles = [cycle + [cycle[0]] for cycle in All_P]
@@ -82,9 +83,9 @@ class EnhancedGraph(nx.Graph):
         B2 = B2[:, QR[2][:rank]]
 
         return B2
-    
-    def get_laplacians(self, sub_size = None, full=False):
-        
+
+    def get_laplacians(self, sub_size=None, full=False):
+
         B1 = self.get_b1()
         B2 = self.get_b2()
 
@@ -92,8 +93,8 @@ class EnhancedGraph(nx.Graph):
         if sub_size != None:
             B1 = B1[:, :sub_size]
             B2 = B2[:sub_size, :]
-            
-        B2 = B2[:,np.sum(np.abs(B2), 0) == 3]
+
+        B2 = B2[:, np.sum(np.abs(B2), 0) == 3]
         nu = B2.shape[1]
 
         if full:
@@ -101,8 +102,10 @@ class EnhancedGraph(nx.Graph):
             return Lu
 
         # Create a matrix to mask/color triangles
-        prob_T = self.p_triangles # ratio of triangles that we want to retain from the original full topology
-        T = int(np.ceil(nu*(1-prob_T)))
+        prob_T = (
+            self.p_triangles
+        )  # ratio of triangles that we want to retain from the original full topology
+        T = int(np.ceil(nu * (1 - prob_T)))
         np.random.seed(self.seed)
         mask = np.random.choice(np.arange(nu), size=T, replace=False)
         I_T = np.ones(nu)
@@ -111,7 +114,7 @@ class EnhancedGraph(nx.Graph):
 
         # Laplacians
         Ld = np.matmul(np.transpose(B1), B1, dtype=float)
-        Lu = B2@I_T@B2.T
-        L = Lu+Ld
+        Lu = B2 @ I_T @ B2.T
+        L = Lu + Ld
         self.mask = I_T
         return Lu, Ld, L

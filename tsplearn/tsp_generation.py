@@ -5,15 +5,15 @@ from scipy.sparse.linalg import eigs
 from sklearn.linear_model import OrthogonalMatchingPursuit
 from typing import Tuple, Union
 from tqdm import tqdm
-from .tsp_utils import memoize_or_save
+from .utils import memoize_or_save
 import os
 import pickle
 from functools import wraps
 
 
-def compute_Lj_and_lambdaj(L: np.ndarray,
-                           J: int, 
-                           separated: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def compute_Lj_and_lambdaj(
+    L: np.ndarray, J: int, separated: bool = False
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute powers of L up to J and the maximum and minimum eigenvalues raised to the powers of 1 through J.
 
@@ -36,15 +36,15 @@ def compute_Lj_and_lambdaj(L: np.ndarray,
         lambda_max_k = lambda_max ** np.arange(1, J + 1)
         lambda_min_k = lambda_min ** np.arange(1, J + 1)
     else:
-        lambda_max_k = lambda_max ** np.array(list(np.arange(1, J + 1))+[0])
-        lambda_min_k = lambda_min ** np.array(list(np.arange(1, J + 1))+[0])
+        lambda_max_k = lambda_max ** np.array(list(np.arange(1, J + 1)) + [0])
+        lambda_min_k = lambda_min ** np.array(list(np.arange(1, J + 1)) + [0])
 
     return Lj, lambda_max_k, lambda_min_k
 
 
-def generate_coeffs(*arrays: np.ndarray, 
-                    P: int, 
-                    mult: int = 10) -> Tuple[np.ndarray, float, float, float, float]:
+def generate_coeffs(
+    *arrays: np.ndarray, P: int, mult: int = 10
+) -> Tuple[np.ndarray, float, float, float, float]:
     """
     Generate coefficients for synthetic data generation.
 
@@ -59,12 +59,14 @@ def generate_coeffs(*arrays: np.ndarray,
 
     # if passing four arguments (two for upper and two for lower laplacian eigevals)
     # it means that you are using dictionary_type="separated"
-    if len(arrays)==2:
+    if len(arrays) == 2:
         lambda_max_k, lambda_min_k = arrays
         J = lambda_max_k.shape[0]
         h = mult / np.max(lambda_max_k) * np.random.rand(P, J)
-        # For later sanity check in optimization phase 
-        tmp_max_vec = h @ lambda_max_k # parallelize the code with simple matrix multiplications
+        # For later sanity check in optimization phase
+        tmp_max_vec = (
+            h @ lambda_max_k
+        )  # parallelize the code with simple matrix multiplications
         tmp_min_vec = h @ lambda_min_k
         c = np.max(tmp_max_vec)
         tmp_sum_max = np.sum(tmp_max_vec)
@@ -74,17 +76,21 @@ def generate_coeffs(*arrays: np.ndarray,
         Delta_max = tmp_sum_max - c
         epsilon = (Delta_max - Delta_min) * np.random.rand() + Delta_min
 
-    elif len(arrays)==4:
+    elif len(arrays) == 4:
         lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k = arrays
         J = lambda_max_u_k.shape[0]
         hI = mult / np.max(lambda_max_d_k) * np.random.rand(P, J)
         hS = mult / np.max(lambda_max_u_k) * np.random.rand(P, J)
-        hH = mult / np.min([np.max(lambda_max_u_k), np.max(lambda_max_d_k)]) * np.random.rand(P, 1)
+        hH = (
+            mult
+            / np.min([np.max(lambda_max_u_k), np.max(lambda_max_d_k)])
+            * np.random.rand(P, 1)
+        )
         h = [hH, hS, hI]
-        tmp_max_vec_S = (hS @ lambda_max_u_k).reshape(P,1)
-        tmp_min_vec_S = (hS @ lambda_min_u_k).reshape(P,1)
-        tmp_max_vec_I = (hI @ lambda_max_d_k).reshape(P,1)
-        tmp_min_vec_I = (hI @ lambda_min_d_k).reshape(P,1)
+        tmp_max_vec_S = (hS @ lambda_max_u_k).reshape(P, 1)
+        tmp_min_vec_S = (hS @ lambda_min_u_k).reshape(P, 1)
+        tmp_max_vec_I = (hI @ lambda_max_d_k).reshape(P, 1)
+        tmp_min_vec_I = (hI @ lambda_min_d_k).reshape(P, 1)
         c = np.max(tmp_max_vec_I + tmp_max_vec_S + hH)
         tmp_sum_min = np.sum(tmp_min_vec_I + tmp_min_vec_S + hH)
         tmp_sum_max = np.sum(tmp_max_vec_I + tmp_max_vec_S + hH)
@@ -92,17 +98,19 @@ def generate_coeffs(*arrays: np.ndarray,
         Delta_max = tmp_sum_max - c
         epsilon = np.max([Delta_min, Delta_max])
     else:
-        raise ValueError("Function accepts either 2 or 4 arrays! In case of 4 arrays are provided,\
-                        the first 2 refer to upper laplacian and the other two to lower laplacian.")
-    
+        raise ValueError(
+            "Function accepts either 2 or 4 arrays! In case of 4 arrays are provided,\
+                        the first 2 refer to upper laplacian and the other two to lower laplacian."
+        )
+
     return h, c, epsilon, tmp_sum_min, tmp_sum_max
 
 
-def generate_dictionary(h: Union[list, np.ndarray], 
-                        P: int, 
-                        *matrices: np.ndarray) -> np.ndarray:
+def generate_dictionary(
+    h: Union[list, np.ndarray], P: int, *matrices: np.ndarray
+) -> np.ndarray:
     """
-    Generate a dictionary matrix as a concatenation of sub-dictionary matrices. Each of the sub-dictionary 
+    Generate a dictionary matrix as a concatenation of sub-dictionary matrices. Each of the sub-dictionary
     matrices is generated from given coefficients and a Laplacian matrix (or matrices if discriminating between
     upper and lower Laplacian).
 
@@ -117,25 +125,25 @@ def generate_dictionary(h: Union[list, np.ndarray],
 
     D = []
     # Check if upper and lower Laplacians are separately provided
-    if len(matrices)==1:
+    if len(matrices) == 1:
         Lj = matrices[0]
         M = Lj.shape[-1]
         J = Lj.shape[0]
 
-        for i in range(0,P):
-            h_tmp = h[i,:-1].reshape(J,1,1)
-            tmp = np.sum(h_tmp*Lj, axis=0) + h[i,-1]*np.eye(M,M)
+        for i in range(0, P):
+            h_tmp = h[i, :-1].reshape(J, 1, 1)
+            tmp = np.sum(h_tmp * Lj, axis=0) + h[i, -1] * np.eye(M, M)
             D.append(tmp)
-    elif len(matrices)==2:
-        Luj , Ldj = matrices
+    elif len(matrices) == 2:
+        Luj, Ldj = matrices
         M = Luj.shape[-1]
         J = Luj.shape[0]
 
-        for i in range(0,P):
-            hu = h[1][i].reshape(J,1,1)
-            hd = h[2][i].reshape(J,1,1)
+        for i in range(0, P):
+            hu = h[1][i].reshape(J, 1, 1)
+            hd = h[2][i].reshape(J, 1, 1)
             hid = h[0][i]
-            tmp = np.sum(hu*Luj + hd*Ldj, axis=0) + hid*np.eye(M,M)
+            tmp = np.sum(hu * Luj + hd * Ldj, axis=0) + hid * np.eye(M, M)
             D.append(tmp)
     else:
         raise ValueError("Function accepts one vector and either 1 or 2 matrices.")
@@ -143,15 +151,19 @@ def generate_dictionary(h: Union[list, np.ndarray],
     return D
 
 
-def create_ground_truth(Lu: np.ndarray, 
-                        Ld: np.ndarray, 
-                        m_train: int, 
-                        m_test: int, 
-                        P: int, 
-                        J: int, 
-                        K0: int,
-                        dictionary_type: str, 
-                        sparsity_mode: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
+def create_ground_truth(
+    Lu: np.ndarray,
+    Ld: np.ndarray,
+    m_train: int,
+    m_test: int,
+    P: int,
+    J: int,
+    K0: int,
+    dictionary_type: str,
+    sparsity_mode: str,
+) -> Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray
+]:
     """
     Create ground truth data for testing dictionary learning algorithms.
 
@@ -170,7 +182,7 @@ def create_ground_truth(Lu: np.ndarray,
     - Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray]:
       Generated dictionary, coefficients, training and test data, epsilon, and sparse representation of training and test data.
     """
-    
+
     if dictionary_type == "joint":
         Lj, lambda_max_k, lambda_min_k = compute_Lj_and_lambdaj(Lu + Ld, J)
         h, c, epsilon, _, _ = generate_coeffs(lambda_max_k, lambda_min_k, P=P)
@@ -182,36 +194,42 @@ def create_ground_truth(Lu: np.ndarray,
         D = generate_dictionary(h, P, Lj)
 
     elif dictionary_type == "separated":
-        Luj, lambda_max_u_k, lambda_min_u_k = compute_Lj_and_lambdaj(Lu, J, separated=True)
-        Ldj, lambda_max_d_k, lambda_min_d_k = compute_Lj_and_lambdaj(Ld, J, separated=True)
-        h, c, epsilon, _, _ = generate_coeffs(lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k, P=P)
+        Luj, lambda_max_u_k, lambda_min_u_k = compute_Lj_and_lambdaj(
+            Lu, J, separated=True
+        )
+        Ldj, lambda_max_d_k, lambda_min_d_k = compute_Lj_and_lambdaj(
+            Ld, J, separated=True
+        )
+        h, c, epsilon, _, _ = generate_coeffs(
+            lambda_max_u_k, lambda_min_u_k, lambda_max_d_k, lambda_min_d_k, P=P
+        )
         D = generate_dictionary(h, P, Luj, Ldj)
 
     M = D.shape[0]
 
     # Signal Generation
-    def _create_column_vec(row,M, P):
-        tmp = np.zeros(M*P)
-        tmp[row['idxs']]=row['non_zero_coeff']
+    def _create_column_vec(row, M, P):
+        tmp = np.zeros(M * P)
+        tmp[row["idxs"]] = row["non_zero_coeff"]
         return tmp
 
     m_total = m_train + m_test
     tmp = pd.DataFrame()
 
     if sparsity_mode == "max":
-        tmp_K0 = np.random.choice(np.arange(1,K0+1), size=(m_total), replace=True)
+        tmp_K0 = np.random.choice(np.arange(1, K0 + 1), size=(m_total), replace=True)
     else:
         tmp_K0 = np.full((m_total,), K0)
     # sparsity coefficient for each column
-    tmp['K0'] = tmp_K0
+    tmp["K0"] = tmp_K0
     # for each column get K0 indexes
-    tmp['idxs'] = tmp.K0.apply(lambda x: np.random.choice(M*P, x, replace=False))
+    tmp["idxs"] = tmp.K0.apply(lambda x: np.random.choice(M * P, x, replace=False))
     # for each of the K0 row indexes in each column, sample K0 values
-    tmp['non_zero_coeff'] = tmp.K0.apply(lambda x: np.random.randn(x))
+    tmp["non_zero_coeff"] = tmp.K0.apply(lambda x: np.random.randn(x))
     # create the column vectors with the desired characteristics
-    tmp['column_vec'] = tmp.apply(lambda x: _create_column_vec(x,M=M, P=P), axis=1)
+    tmp["column_vec"] = tmp.apply(lambda x: _create_column_vec(x, M=M, P=P), axis=1)
     # finally derive the sparse signal representation matrix
-    X = np.column_stack(tmp['column_vec'].values)
+    X = np.column_stack(tmp["column_vec"].values)
 
     all_data = D @ X
     X_train = X[:, :m_train]
@@ -222,9 +240,7 @@ def create_ground_truth(Lu: np.ndarray,
     return D, h, train_Y, test_Y, epsilon, c, X_train, X_test
 
 
-def get_omp_coeff(K0: int, 
-                  Domp: np.ndarray, 
-                  col: np.ndarray) -> np.ndarray:
+def get_omp_coeff(K0: int, Domp: np.ndarray, col: np.ndarray) -> np.ndarray:
     """
     Compute the coefficients using Orthogonal Matching Pursuit.
 
@@ -242,11 +258,13 @@ def get_omp_coeff(K0: int,
     return omp.coef_
 
 
-def verify_dic(D: np.ndarray, 
-               Y_train: np.ndarray, 
-               X_train_true: np.ndarray,
-               K0_max: int, 
-               acc_thresh: float) -> Tuple[int, float]:
+def verify_dic(
+    D: np.ndarray,
+    Y_train: np.ndarray,
+    X_train_true: np.ndarray,
+    K0_max: int,
+    acc_thresh: float,
+) -> Tuple[int, float]:
     """
     Verify dictionary using Orthogonal Matching Pursuit by evaluating the sparse approximation for several levels of sparsity
 
@@ -262,59 +280,69 @@ def verify_dic(D: np.ndarray,
     """
 
     dd = la.norm(D, axis=0)
-    W = np.diag(1. / dd)  
+    W = np.diag(1.0 / dd)
     Domp = D @ W
-    for K0 in range(1, K0_max+1):
-        idx = np.sum(np.abs(X_train_true) > 0, axis=0) == K0 
+    for K0 in range(1, K0_max + 1):
+        idx = np.sum(np.abs(X_train_true) > 0, axis=0) == K0
         try:
             tmp_train = Y_train[:, idx]
             X_true_tmp = X_train_true[:, idx]
             idx_group = np.abs(X_true_tmp) > 0
-            X_tr = np.apply_along_axis(lambda x: get_omp_coeff(K0, Domp.real, x), axis=0, arr=tmp_train)
+            X_tr = np.apply_along_axis(
+                lambda x: get_omp_coeff(K0, Domp.real, x), axis=0, arr=tmp_train
+            )
             idx_train = np.abs(X_tr) > 0
-            acc = np.sum(np.sum(idx_group == idx_train, axis=0) == idx_group.shape[0])/idx_group.shape[1]
+            acc = (
+                np.sum(np.sum(idx_group == idx_train, axis=0) == idx_group.shape[0])
+                / idx_group.shape[1]
+            )
             if acc < acc_thresh:
                 fin_acc = acc
                 break
             else:
                 fin_acc = acc
         except:
-            fin_acc=0
+            fin_acc = 0
     max_possible_sparsity = K0 - 1
     return max_possible_sparsity, fin_acc
 
+
 @memoize_or_save
 def generate_data(Lu, Ld, **kwargs):
-    
-    params = {'dictionary_type':'separated',
-              'M':1,
-              'P':1,
-              'J':1,
-              'n_sim':1,
-              'm_test':10,
-              'm_train':10,
-              'K0_max':20,
-              'n_search':10,
-              'prob_T':1.,
-              'sparsity_mode':"max",
-              'verbose':True}
-    
+
+    params = {
+        "dictionary_type": "separated",
+        "M": 1,
+        "P": 1,
+        "J": 1,
+        "n_sim": 1,
+        "m_test": 10,
+        "m_train": 10,
+        "K0_max": 20,
+        "n_search": 10,
+        "prob_T": 1.0,
+        "sparsity_mode": "max",
+        "verbose": True,
+    }
+
     params.update(kwargs)
 
-    dictionary_type = params['dictionary_type']
-    M = params['M']
-    P = params['P']
-    J = params['J']
-    n_sim = params['n_sim']
-    m_test = params['m_test']
-    m_train = params['m_train']
-    K0_max = params['K0_max']
-    n_search = params['n_search']
-    prob_T = params['prob_T']
-    verbose = params['verbose']
-    sparsity_mode = params['sparsity_mode']
+    dictionary_type = params["dictionary_type"]
+    M = params["M"]
+    P = params["P"]
+    J = params["J"]
+    n_sim = params["n_sim"]
+    m_test = params["m_test"]
+    m_train = params["m_train"]
+    K0_max = params["K0_max"]
+    n_search = params["n_search"]
+    prob_T = params["prob_T"]
+    verbose = params["verbose"]
+    sparsity_mode = params["sparsity_mode"]
 
-    assert prob_T<=1 or prob_T>=0, "You must provide a \'prob_T\' input between 0 and 1."
+    assert (
+        prob_T <= 1 or prob_T >= 0
+    ), "You must provide a 'prob_T' input between 0 and 1."
 
     D_true = np.zeros((M, M * P, n_sim))
     Y_train = np.zeros((M, m_train, n_sim))
@@ -329,22 +357,31 @@ def generate_data(Lu, Ld, **kwargs):
 
         for _ in tqdm(range(n_search)):
             try:
-                D_try, h, Y_train_try, Y_test_try, epsilon_try, c_try, X_train_try, X_test_try = create_ground_truth(Lu=Lu,
-                                                                                                                        Ld=Ld,
-                                                                                                                        m_train=m_train,
-                                                                                                                        m_test=m_test, 
-                                                                                                                        P=P, 
-                                                                                                                        J=J, 
-                                                                                                                        K0=K0_max, 
-                                                                                                                        dictionary_type=dictionary_type, 
-                                                                                                                        sparsity_mode=sparsity_mode
-                                                                                                                        )
-                                            
-                max_possible_sparsity, _ = verify_dic(D_try, 
-                                                        Y_train_try, 
-                                                        X_train_try, 
-                                                        K0_max, .7)
-                
+                (
+                    D_try,
+                    h,
+                    Y_train_try,
+                    Y_test_try,
+                    epsilon_try,
+                    c_try,
+                    X_train_try,
+                    X_test_try,
+                ) = create_ground_truth(
+                    Lu=Lu,
+                    Ld=Ld,
+                    m_train=m_train,
+                    m_test=m_test,
+                    P=P,
+                    J=J,
+                    K0=K0_max,
+                    dictionary_type=dictionary_type,
+                    sparsity_mode=sparsity_mode,
+                )
+
+                max_possible_sparsity, _ = verify_dic(
+                    D_try, Y_train_try, X_train_try, K0_max, 0.7
+                )
+
                 if max_possible_sparsity > best_sparsity:
                     best_sparsity = max_possible_sparsity
                     D_true[:, :, sim] = D_try
