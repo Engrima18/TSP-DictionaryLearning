@@ -1,0 +1,13 @@
+max_sparsity: 26
+min_sparsity: 5
+sparsity_freq: 4
+lambda_: 1e-7
+tol: 1e-7
+max_iter: 100
+patience: 5
+verbose: True
+QP: True
+warmup: 2
+on_test: False
+topo_learning_mode: "optimistic"
+complete: True
