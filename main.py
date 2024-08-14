@@ -163,32 +163,32 @@ def param_dict_learning(
                             f"Topology Approx. Error: {dict_errors[d[0]][2][sim,k0_index]:.3f}"
                         )
 
-                except:
+                except Exception as e:
                     logging.error(
                         f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
                     )
-                    try:
-                        (
-                            dict_errors[d[0]][0][sim, k0_index],
-                            dict_errors[d[0]][1][sim, k0_index],
-                            dict_errors[d[0]][2][sim, k0_index],
-                        ) = (
-                            dict_errors[d[0]][0][sim - 1, k0_index],
-                            dict_errors[d[0]][1][sim - 1, k0_index],
-                            dict_errors[d[0]][2][sim - 1, k0_index],
-                        )
-                    except:
-                        (
-                            dict_errors[d[0]][0][sim, k0_index],
-                            dict_errors[d[0]][1][sim, k0_index],
-                            dict_errors[d[0]][2][sim, k0_index],
-                        ) = (
-                            dict_errors[d[0]][0][sim + 1, k0_index],
-                            dict_errors[d[0]][1][sim + 1, k0_index],
-                            dict_errors[d[0]][2][sim + 1, k0_index],
-                        )
+                    # try:
+                    #     (
+                    #         dict_errors[d[0]][0][sim, k0_index],
+                    #         dict_errors[d[0]][1][sim, k0_index],
+                    #         dict_errors[d[0]][2][sim, k0_index],
+                    #     ) = (
+                    #         dict_errors[d[0]][0][sim - 1, k0_index],
+                    #         dict_errors[d[0]][1][sim - 1, k0_index],
+                    #         dict_errors[d[0]][2][sim - 1, k0_index],
+                    #     )
+                    # except:
+                    #     (
+                    #         dict_errors[d[0]][0][sim, k0_index],
+                    #         dict_errors[d[0]][1][sim, k0_index],
+                    #         dict_errors[d[0]][2][sim, k0_index],
+                    #     ) = (
+                    #         dict_errors[d[0]][0][sim + 1, k0_index],
+                    #         dict_errors[d[0]][1][sim + 1, k0_index],
+                    #         dict_errors[d[0]][2][sim + 1, k0_index],
+                    #     )
 
-        dict_errors = handle_diverged(dict_errors)
+    dict_errors = handle_diverged(dict_errors)
 
     return dict_errors, models
 

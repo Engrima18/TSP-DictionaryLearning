@@ -32,9 +32,9 @@ def plot_error_curves(
     i = 0 if test_error else 1
     res_df = pd.DataFrame()
     for typ in dict_errors.keys():
-        tmp_df = pd.DataFrame({"Error": dict_errors[typ][i]})
-        tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
+        tmp_df = pd.DataFrame(dict_errors[typ][i])
         tmp_df.columns = K0_coll
+        tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
         tmp_df["Method"] = dict_types[typ]
         res_df = pd.concat([res_df, tmp_df])
 

@@ -10,5 +10,5 @@ n_sim: 10
 sub_size: 100
 n: 40
 p_edges: 0.162
-p_triangles: 0.5
+p_triangles: 0.8
 seed: 0
