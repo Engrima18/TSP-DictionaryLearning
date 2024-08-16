@@ -5,10 +5,14 @@ import seaborn as sns
 import networkx as nx
 import pandas as pd
 import numpy as np
+from topolearn.utils import save_plot
 
 
+@save_plot
 def plot_error_curves(
-    dict_errors, K0_coll, dictionary_type: str = "separated", test_error: bool = True
+    dict_errors,
+    K0_coll,
+    **kwargs,
 ) -> plt.Axes:
     """
     Plot the test error curves for learning algorithms comparing Fourier, Edge, Joint, and Separated dictionary parametrization.
@@ -20,6 +24,13 @@ def plot_error_curves(
     Returns:
     - plt.Axes: The Axes object of the plot.
     """
+
+    params = {"dictionary_type": "separated", "prob_T": 1.0, "test_error": True}
+
+    params.update(kwargs)
+    dictionary_type = params["dictionary_type"]
+    prob_T = params["prob_T"]
+    test_error = params["test_error"]
 
     dict_types = {
         "fourier": "Fourier",
@@ -36,7 +47,7 @@ def plot_error_curves(
         tmp_df.columns = K0_coll
         tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
         tmp_df["Method"] = dict_types[typ]
-        res_df = pd.concat([res_df, tmp_df])
+        res_df = pd.concat([res_df, tmp_df]).reset_index(drop=True)
 
     markers = (
         [">", "^", "v", "d"]
@@ -60,7 +71,6 @@ def plot_error_curves(
     my_plt.set_title(f"True dictionary: {TITLE}")
     xlabel = "Test" if test_error else "Training"
     my_plt.set_ylabel(f"{xlabel} NMSE (log scale)")
-    plt.show()
 
     return my_plt
 

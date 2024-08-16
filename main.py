@@ -13,7 +13,7 @@ from topolearn import *
 warnings.filterwarnings("ignore")
 
 parser = argparse.ArgumentParser(
-    description="Run TSP learning with specified configuration."
+    description="Run dictionary and topology learning with specified configuration."
 )
 parser.add_argument(
     "--config-dir", type=str, default="config", help="Configuration directory"
@@ -57,13 +57,11 @@ def param_dict_learning(
     Y_test,
     c_true,
     epsilon_true,
-    n_sim,
+    simulation_params,
     init_params,
     algo_params,
     K0_coll,
     Lu_true,
-    prob_T,
-    complete=True,
     verbose: bool = True,
 ):
     """
@@ -76,6 +74,7 @@ def param_dict_learning(
         - Separated Hodge Laplacian dictionary parameterization
         - (Optionally) Separated Hodge Laplacian dictionary parameterization plus Topology Learning
     """
+    n_sim = X_train.shape[-1]
 
     min_error_fou_train = np.zeros((n_sim, len(K0_coll)))
     min_error_fou_test = np.zeros((n_sim, len(K0_coll)))
@@ -105,7 +104,7 @@ def param_dict_learning(
         "separated": ("Separated Hodge Laplacian", "separated"),
     }
 
-    if complete:
+    if algo_params["complete"]:
         min_error_complete_train = np.zeros((n_sim, len(K0_coll)))
         min_error_complete_test = np.zeros((n_sim, len(K0_coll)))
         dict_errors["complete"] = (
@@ -167,28 +166,18 @@ def param_dict_learning(
                     logging.error(
                         f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
                     )
-                    # try:
-                    #     (
-                    #         dict_errors[d[0]][0][sim, k0_index],
-                    #         dict_errors[d[0]][1][sim, k0_index],
-                    #         dict_errors[d[0]][2][sim, k0_index],
-                    #     ) = (
-                    #         dict_errors[d[0]][0][sim - 1, k0_index],
-                    #         dict_errors[d[0]][1][sim - 1, k0_index],
-                    #         dict_errors[d[0]][2][sim - 1, k0_index],
-                    #     )
-                    # except:
-                    #     (
-                    #         dict_errors[d[0]][0][sim, k0_index],
-                    #         dict_errors[d[0]][1][sim, k0_index],
-                    #         dict_errors[d[0]][2][sim, k0_index],
-                    #     ) = (
-                    #         dict_errors[d[0]][0][sim + 1, k0_index],
-                    #         dict_errors[d[0]][1][sim + 1, k0_index],
-                    #         dict_errors[d[0]][2][sim + 1, k0_index],
-                    #     )
 
-    dict_errors = handle_diverged(dict_errors)
+                    (
+                        dict_errors[d[0]][0][sim, k0_index],
+                        dict_errors[d[0]][1][sim, k0_index],
+                        dict_errors[d[0]][2][sim, k0_index],
+                    ) = (
+                        None,
+                        None,
+                        None,
+                    )
+
+    # dict_errors = handle_diverged(dict_errors)
 
     return dict_errors, models
 
@@ -229,7 +218,7 @@ def main(cfg: DictConfig):
     L_true = topology_data["L"]
     Lu_true = topology_data["Lu"]
     Ld_true = topology_data["Ld"]
-    B2_true = topology_data["B2_true"]
+    # B2_true = topology_data["B2_true"]
     M = topology_data["M"]
 
     # Generate data
@@ -251,7 +240,7 @@ def main(cfg: DictConfig):
     load_data = generate_data(Lu_true, Ld_true, **gen_params)
     print("Data generating process complete!")
 
-    D_true = load_data["D_true"]
+    # D_true = load_data["D_true"]
     Y_train = load_data["Y_train"]
     Y_test = load_data["Y_test"]
     X_train = load_data["X_train"]
@@ -266,6 +255,11 @@ def main(cfg: DictConfig):
     )
 
     log_configurations(cfg, hydra.compose(config_name="algorithm.yaml"))
+
+    simulation_params = {
+        "sparsity_mode": sparsity_mode,
+        "true_dictionary_type": dictionary_type,
+    }
 
     init_params = {
         "J": J,
@@ -286,33 +280,30 @@ def main(cfg: DictConfig):
         "mode": algo_cfg.topo_learning_mode,
         "warmup": algo_cfg.warmup,
         "on_test": algo_cfg.on_test,
+        "complete": algo_cfg.complete,
         "verbose": algo_cfg.verbose,
     }
 
     print("Starting the learning algorithm...")
 
-    results, models = param_dict_learning(
+    _, _, results_path = param_dict_learning(
         X_train=X_train,
         X_test=X_test,
         Y_train=Y_train,
         Y_test=Y_test,
         c_true=c_true,
         epsilon_true=epsilon_true,
-        n_sim=n_sim,
+        simulation_params=simulation_params,
         init_params=init_params,
         algo_params=algo_params,
         K0_coll=K0_coll,
         Lu_true=Lu_true,
-        prob_T=prob_T,
-        complete=True,
     )
 
     print("Learning process complete!")
 
-    results_path = f"results/final/resT{int(prob_T*100)}.pkl"
+    # results_path = f"results/final/resT{int(prob_T*100)}.pkl"
     logging.info(f"Results saved in: {results_path}")
-
-    # plotted_curves = plot_error_curves(results, dictionary_type)
 
 
 if __name__ == "__main__":

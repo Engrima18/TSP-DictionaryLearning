@@ -2,6 +2,7 @@ import scipy.linalg as sla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
+from cvxpy.error import SolverError
 from .data_generation import *
 from .utilsTopoSolver import *
 from .Hodgelets import *  # SeparateHodgelet, SimplicianSlepians
@@ -119,22 +120,8 @@ class TopoSolver:
         ##                                                                                                        ##
         ############################################################################################################
 
-        # Init the dictionary parameters according to the specific parameterization setup
-        if self.dictionary_type == "separated":
-            hs = np.zeros(
-                (self.P, self.J)
-            )  # multiplicative coefficients for Upper Laplacian
-            hi = np.zeros(
-                (self.P, self.J)
-            )  # multiplicative coefficients for Lower Laplacian
-            hh = np.zeros(
-                (self.P, 1)
-            )  # multiplicative coefficients for identity matrix
-            self.h_opt: List[np.ndarray] = [hh, hs, hi]
-        else:
-            h = np.zeros((self.P, self.J))
-            hi = np.zeros((self.P, 1))
-            self.h_opt: List[np.ndarray] = [h, hi]
+        # Initialize the optimal values of the dictionary coefficients
+        self.zero_out_h()
 
         # Compute the polynomial extension for the Laplacians and the auxiliary
         # "pseudo-vandermonde" matrix for the constraints in the quadratic form
@@ -224,6 +211,28 @@ class TopoSolver:
             else:
                 self.h_opt[1] = np.full((self.P, self.J), init_val)
 
+    def zero_out_h(self):
+        # Init the dictionary parameters according to the specific parameterization setup
+        if self.dictionary_type == "separated":
+            hs = np.zeros(
+                (self.P, self.J)
+            )  # multiplicative coefficients for Upper Laplacian
+            hi = np.zeros(
+                (self.P, self.J)
+            )  # multiplicative coefficients for Lower Laplacian
+            hh = np.zeros(
+                (self.P, 1)
+            )  # multiplicative coefficients for identity matrix
+            self.h_opt: List[np.ndarray] = [hh, hs, hi]
+        else:
+            h = np.zeros((self.P, self.J))
+            hi = np.zeros((self.P, 1))
+            self.h_opt: List[np.ndarray] = [h, hi]
+
+    def default_solver(self, solver, prob):
+        self.init_dict(mode="only_X")
+        prob.solve(solver=solver, verbose=False)
+
     @staticmethod
     def _multiplier_search(*arrays, P, c, epsilon):
         is_okay = 0
@@ -281,6 +290,8 @@ class TopoSolver:
         Returns:
             Tuple[np.ndarray, np.ndarray, bool]: Initialized dictionary, initialized sparse representation, and discard flag value.
         """
+
+        self.zero_out_h()
 
         # If no prior info on the dictionary
         if np.all(h_prior == None):
@@ -578,6 +589,7 @@ class TopoSolver:
         iter_, pat_iter = 1, 0
         train_hist = []
         test_hist = []
+        solver = eval(f"cp.{solver}")
 
         # Learnable Dictionary -> alternating-direction optimization algorithm
         if self.dict_is_learnable:
@@ -623,10 +635,29 @@ class TopoSolver:
                 )
 
                 prob = cp.Problem(obj, constraints)
-                prob.solve(solver=eval(f"cp.{solver}"), verbose=False)
+
+                solver_params = {
+                    "NumericFocus": 1 | 2 | 3,
+                    "Aggregate": 0,
+                    "ScaleFlag": 2,
+                    "ObjScale": -0.5,
+                    "BarHomogeneous": 1,
+                    "Method": 1,
+                }
+                try:
+                    # If we are unable to move from starting conditions -> use default solver parameters
+                    if pat_iter > 0 and np.all(h_opt == 0):
+                        self.default_solver(solver, prob)
+                    else:
+                        prob.solve(solver=solver, verbose=False, **solver_params)
+                        # If some solver parameters relax too much the problem -> use default solver parameters
+                        if prob.status == "infeasible_or_unbounded":
+                            self.default_solver(solver, prob)
+                except:
+                    # If in any case the solver with tuned parameters fails -> use the default solver parameters
+                    self.default_solver(solver, prob)
 
                 # Update the dictionary
-
                 if self.dictionary_type in ["joint", "edge"]:
                     h_list = split_coeffs(h, self.P, self.J)
                     # print(h_tmp.shape)

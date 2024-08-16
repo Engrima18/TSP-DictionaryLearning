@@ -78,11 +78,11 @@ def handle_diverged(res):
 
         res_tuple = []
         for i in range(2):
-            non_diverging_mask = ~np.any(in_tuple[i] == 0, axis=1)
+            non_diverging_mask = ~np.any(in_tuple[i] == None, axis=1)
             non_diverging_sim = in_tuple[i][non_diverging_mask]
             mean_error = np.mean(non_diverging_sim, axis=0)
 
-            diverging_examples = in_tuple[i] == 0
+            diverging_examples = in_tuple[i] == None
             matrix = np.where(diverging_examples, mean_error, in_tuple[i])
             res_tuple.append(matrix)
 
