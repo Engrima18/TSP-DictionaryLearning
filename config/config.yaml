@@ -1,4 +1,4 @@
-dictionary_type: "separated"
+dictionary_type: "edge"
 m_train: 150
 m_test: 80
 P: 3
