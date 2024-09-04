@@ -12,6 +12,7 @@ __all__ = [
     "EnhancedGraph",
     "plot_error_curves",
     "plot_changepoints_curve",
+    "plot_topology_approx_errors",
     "plot_algo_errors",
     "plot_learnt_topology",
     "complete_learning_test",

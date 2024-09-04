@@ -269,6 +269,7 @@ def main(cfg: DictConfig):
         "p_edges": p_edges,
         "sub_size": sub_size,
         "seed": seed,
+        "sparsity": K0_max,
     }
 
     algo_params = {

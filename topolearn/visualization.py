@@ -6,6 +6,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 from topolearn.utils import save_plot
+from IPython.display import display
 
 
 @save_plot
@@ -71,6 +72,23 @@ def plot_error_curves(
     my_plt.set_title(f"True dictionary: {TITLE}")
     xlabel = "Test" if test_error else "Training"
     my_plt.set_ylabel(f"{xlabel} NMSE (log scale)")
+
+    return my_plt
+
+
+@save_plot
+def plot_topology_approx_errors(res_df, **kwargs):
+
+    res_df = res_df.reset_index()
+    my_plt = sns.lineplot(
+        data=res_df,
+        x="Sparsity",
+        y="Error",
+        hue="Number of Triangles",
+        palette=sns.color_palette("viridis", as_cmap=True),
+    )
+
+    my_plt.set(ylabel=r"$||L_u - \hat{L}_u^*||^2$")
 
     return my_plt
 
@@ -201,8 +219,16 @@ def plot_changepoints_curve(
     plt.show()
 
 
+@save_plot
 def plot_learnt_topology(
-    G_true, Lu_true, B2_true, model_gt, model_opt, model_pess=None, sub_size=100
+    G_true,
+    Lu_true,
+    B2_true,
+    model_gt,
+    model_opt,
+    model_pess=None,
+    sub_size=100,
+    **kwargs,
 ):
 
     try:
@@ -279,7 +305,6 @@ def plot_learnt_topology(
         i += 1
 
     plt.tight_layout()
-    plt.show()
 
 
 def plot_algo_errors(errors: dict[str, np.ndarray], k0_coll: np.ndarray) -> plt.Axes:
@@ -329,6 +354,5 @@ def plot_algo_errors(errors: dict[str, np.ndarray], k0_coll: np.ndarray) -> plt.
     my_plt.set(yscale="log")
     my_plt.set_title("Topology learning: algorithms comparison")
     my_plt.set_ylabel("Error (log scale)")
-    plt.show()
 
     return my_plt

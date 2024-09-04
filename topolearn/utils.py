@@ -56,23 +56,26 @@ def memoize_or_save(func):
         dictionary_type = kwargs.get("dictionary_type", "separated")
         prob_T = kwargs.get("prob_T", 1)
         sparsity_mode = kwargs.get("sparsity_mode", "max")
+        sparsity = kwargs.get("K0_max", 20)
 
         if prob_T == 1:
             name = f"full_data_{dictionary_type}"
         else:
             name = f"top_data_T{int(prob_T*100)}"
         path = os.getcwd()
-        dir = "max_sparsity" if sparsity_mode == "max" else "random_sparsity"
+        dir = (
+            f"max_sparsity{sparsity}"
+            if sparsity_mode == "max"
+            else f"random_sparsity{sparsity}"
+        )
         dir_path = f"{path}\\synthetic_data\\{dir}"
         filename = f"{dir_path}\\{name}.pkl"
 
         try:
-            # Try to load data from file
             with open(filename, "rb") as f:
                 data = pickle.load(f)
             f.close()
         except FileNotFoundError:
-            # If file not found, generate data and save
             D_true, Y_train, Y_test, X_train, X_test, epsilon_true, c_true = func(
                 Lu, Ld, **kwargs
             )
@@ -114,9 +117,11 @@ def final_save(func):
         elif "init_params" in func_params:
             index = func_params.index("init_params")
             if index < len(args):
-                prob_T = args[index]
+                prob_T = args[index].get("true_prob_T", None)
+                k0 = args[index].get("sparsity", 20)
             else:
                 prob_T = kwargs["init_params"].get("true_prob_T", None)
+                k0 = kwargs["init_params"].get("sparsity", 20)
 
         else:
             raise ValueError(
@@ -127,9 +132,14 @@ def final_save(func):
             d = kwargs["simulation_params"].get("true_dictionary_type", "separated")
             mode = kwargs["simulation_params"].get("sparsity_mode", "max")
 
+        res_dir = "results\\final"
         res, models = func(*args, **kwargs)
-        dir = "max_sparsity" if mode == "max" else "random_sparsity"
+        dir = f"max_sparsity{k0}" if mode == "max" else f"random_sparsity{k0}"
         file_path = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}.pkl"
+
+        path = os.getcwd()
+        dir_path = os.path.join(path, res_dir, dir)
+        os.makedirs(dir_path, exist_ok=True)
 
         with open(file_path, "wb") as file:
             pickle.dump(models, file)
@@ -152,25 +162,35 @@ def save_plot(func):
         plot = func(*args, **kwargs)
         path = os.getcwd()
         dir_name = "plots\\final"
+        d = kwargs.get("dictionary_type", "separated")
+        p = kwargs.get("prob_T", 1)
+        te = kwargs.get("test_error", True)
+        k0 = kwargs.get("sparsity", 20)
+        k = kwargs.get("algo_sparsity", 20)
+        mode = kwargs.get("sparsity_mode", "max")
+        dir_name += f"\\max_sparsity{k0}" if mode == "max" else f"\\random_sparsity{k0}"
 
         if func_name == "plot_error_curves":
-            d = kwargs.get("dictionary_type", "separated")
-            p = kwargs.get("prob_T", 1)
-            te = kwargs.get("test_error", True)
-            mode = kwargs.get("sparsity_mode", "max")
-            dir_name += "\\max_sparsity" if mode == "max" else "\\random_sparsity"
             file_name = (
                 f"test_error_{d}_T{int(p*100)}.png"
                 if te
                 else f"train_error_{d}_T{int(p*100)}.png"
             )
 
+        elif func_name == "plot_topology_approx_errors":
+            file_name = "topology_approx_error.png"
+
+        elif func_name == "plot_learnt_topology":
+            file_name = f"learnt_topology_T{int(p*100)}_S{k}.png"
+
         else:
             return plot
 
-        # file_name = os.path.join(dir_name, file_name)
-        file_path = os.path.join(path, dir_name, file_name)
+        dir_path = os.path.join(path, dir_name)
+        os.makedirs(dir_path, exist_ok=True)
+        file_path = os.path.join(dir_path, file_name)
         plt.savefig(file_path)
+        plt.close()
         print(f"Plot saved to {file_path}")
 
         return plot

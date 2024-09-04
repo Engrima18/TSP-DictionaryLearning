@@ -4,96 +4,183 @@ import re
 from datetime import datetime
 import hydra
 from omegaconf import DictConfig, OmegaConf
-import argparse
 import pandas as pd
 import numpy as np
+import warnings
 from topolearn import (
     plot_learnt_topology,
     plot_algo_errors,
     plot_error_curves,
     plot_changepoints_curve,
+    plot_topology_approx_errors,
+    EnhancedGraph,
+    TopoSolver,
 )
 
-parser = argparse.ArgumentParser(
-    description="Run dictionary and topology learning with specified configuration."
-)
-parser.add_argument(
-    "--config-dir", type=str, default="config", help="Configuration directory"
-)
-parser.add_argument(
-    "--config-name",
-    type=str,
-    default="visualization.yaml",
-    help="Configuration file name",
-)
-args = parser.parse_args()
+warnings.filterwarnings("ignore")
 
 
-def compare_Lu_approx(K0_coll, nu, res_dir="results\\final"):
-    res_df = pd.DataFrame()
-    PATH = os.path.join(os.getcwd(), res_dir)
-    pattern = re.compile(r"(\d{2})\.(pkl|pickle)$")
+def plot_main_curves(curves_params, res_path, K0_coll):
 
-    if not os.path.exists(PATH):
-        print(f"The directory {PATH} does not exist.")
-    else:
-        for filename in os.listdir(PATH):
-            # Check pickle files
-            if filename.endswith(".pkl") or filename.endswith(".pickle"):
+    with open(res_path, "rb") as file:
+        models = pickle.load(file)
+        res = pickle.load(file)
 
-                file_path = os.path.join(PATH, filename)
-                match = pattern.search(filename)
-                if match:
-                    triangles = match.group(1)
+    # Plot test error curves
+    plot_error_curves(dict_errors=res, K0_coll=K0_coll, **curves_params)
+    # Plot training error curves
+    curves_params["test_error"] = False
+    plot_error_curves(dict_errors=res, K0_coll=K0_coll, **curves_params)
 
-                try:
-                    with open(file_path, "rb") as f:
-                        _ = pickle.load(f)
-                        res = pickle.load(f)
-
-                    tmp_df = pd.DataFrame(res["complete"][2])
-                    tmp_df.columns = K0_coll
-                    tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
-                    tmp_df["Number of Triangles"] = nu - int(
-                        np.ceil(nu * (1 - float(triangles) / 100))
-                    )
-                    res_df = pd.concat([res_df, tmp_df])
-
-                except Exception as e:
-                    print(f"Failed to process {filename}: {e}")
-
-    return res_df
+    return res, models
 
 
-@hydra.main(
-    config_path=args.config_dir, config_name=args.config_name, version_base=None
-)
+def fit_gt_model(i, p, G, Lu, K0_coll, data_path, cfg):
+
+    with open(data_path, "rb") as f:
+        data = pickle.load(f)
+
+    init_params = {
+        "J": cfg.J,
+        "P": cfg.P,
+        "c": data["c_true"][cfg.n_sim - 1],
+        "epsilon": data["epsilon_true"][cfg.n_sim - 1],
+        "true_prob_T": p,
+        "sub_size": cfg.sub_size,
+        "seed": cfg.seed,
+        "n": cfg.n,
+        "K0": K0_coll[i],
+        "p_edges": cfg.p_edges,
+        "dictionary_type": "separated",
+        "G_true": G,
+    }
+
+    algo_params = {
+        "lambda_": cfg.lambda_,
+        "tol": cfg.tol,
+        "patience": cfg.patience,
+        "max_iter": cfg.max_iter,
+        "QP": True,
+        "mode": "optimistic",
+        "verbose": False,
+    }
+
+    gt_model = TopoSolver(
+        X_train=data["X_train"][:, :, cfg.n_sim - 1],
+        X_test=data["X_test"][:, :, cfg.n_sim - 1],
+        Y_train=data["Y_train"][:, :, cfg.n_sim - 1],
+        Y_test=data["Y_test"][:, :, cfg.n_sim - 1],
+        **init_params,
+    )
+
+    gt_model.fit(
+        Lu_true=Lu,
+        init_mode="only_X",
+        learn_topology=False,
+        **algo_params,
+    )
+
+    return gt_model
+
+
+@hydra.main(config_path="config", config_name="visualization", version_base="1.3")
 def main(cfg: DictConfig):
 
     path = os.getcwd()
     K0_coll = np.arange(cfg.min_sparsity, cfg.max_sparsity, cfg.sparsity_freq)
     dict_types = ["separated", "edge", "joint"]
     p_triangles = cfg.p_triangles_list
+    s_modes = cfg.sparsity_mode_list
+    max_s = cfg.max_sparsity_list
 
     for d in dict_types:
-        if d == "separated":
-            for p in p_triangles:
+        for mode in s_modes:
+            for s in max_s:
+                dir_path = f"{path}\\results\\final\\{mode}_sparsity{s}"
+                if d == "separated":
+                    complete = True
+                    res_df = pd.DataFrame()
+                    for p in p_triangles:
+                        curves_params = {
+                            "dictionary_type": d,
+                            "test_error": True,
+                            "prob_T": p,
+                            "sparsity_mode": mode,
+                            "sparsity": s,
+                        }
 
-                # data_path = f"{path}\\synthetic_data\\{name}.pkl"
-                res_path = f"{path}\\results\\final\\resT{int(p*100)}.pkl"
+                        res_path = f"{dir_path}\\res_{d}_T{int(p*100)}.pkl"
+                        data_path = f"{path}\\synthetic_data\\{mode}_sparsity{s}\\top_data_T{int(p*100)}.pkl"
+                        print(f"Prova: {res_path}")
+                        try:
+                            # Plot training and test sparse representation error curves
+                            res, models = plot_main_curves(
+                                curves_params, res_path, K0_coll
+                            )
 
-                with open(res_path, "rb") as file:
-                    models = pickle.load(file)
-                    res = pickle.load(file)
+                            if p != 1.0:
 
-                # Plot test error curves
-                curves_params = {"dictionary_type": d, "test_error": True, "prob_T": p}
-                plot_error_curves(dict_errors=res, K0_coll=K0_coll, **curves_params)
-                # Plot training error curves
-                curves_params["test_error"] = False
-                plot_error_curves(dict_errors=res, K0_coll=K0_coll, **curves_params)
-        else:
-            pass
+                                for i, k in enumerate(K0_coll):
+                                    curves_params["algo_sparsity"] = k
+                                    example_model = models[f"{cfg.n_sim-1},{i}"]
+                                    G = EnhancedGraph(
+                                        n=cfg.n,
+                                        p_edges=cfg.p_edges,
+                                        p_triangles=p,
+                                        seed=cfg.seed,
+                                    )
+                                    Lu, _, _ = G.get_laplacians(sub_size=cfg.sub_size)
+                                    B2 = G.get_b2()
+                                    B2 = B2[: cfg.sub_size, :]
+                                    B2 = B2[:, np.sum(np.abs(B2), 0) == 3]
+                                    B2 = B2 @ G.mask
+                                    gt_model = fit_gt_model(
+                                        i, p, G, Lu, K0_coll, data_path, cfg
+                                    )
+                                    plot_learnt_topology(
+                                        G,
+                                        Lu,
+                                        B2,
+                                        gt_model,
+                                        example_model,
+                                        None,
+                                        cfg.sub_size,
+                                        **curves_params,
+                                    )
+
+                                tmp_df = pd.DataFrame(res["complete"][2])
+                                tmp_df.columns = K0_coll
+                                tmp_df = tmp_df.melt(
+                                    var_name="Sparsity", value_name="Error"
+                                )
+
+                                tmp_df["Number of Triangles"] = cfg.nu - int(
+                                    np.ceil(cfg.nu * (1 - p))
+                                )
+                                res_df = pd.concat([res_df, tmp_df])
+
+                        except FileNotFoundError:
+                            complete = False
+                            print(f"No results found for {res_path}")
+                    if complete:
+                        # Plot topology approximation error
+                        plot_topology_approx_errors(res_df, **curves_params)
+
+                else:
+                    p = 1.0
+                    curves_params = {
+                        "dictionary_type": d,
+                        "test_error": True,
+                        "prob_T": p,
+                        "sparsity_mode": mode,
+                        "sparsity": s,
+                    }
+                    res_path = f"{dir_path}\\res_{d}_T{int(p*100)}.pkl"
+                    try:
+                        print(f"Prova: {res_path}")
+                        res, _ = plot_main_curves(curves_params, res_path, K0_coll)
+                    except FileNotFoundError:
+                        print(f"No results found for {res_path}")
 
 
 if __name__ == "__main__":
