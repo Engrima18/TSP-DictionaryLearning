@@ -10,7 +10,7 @@ from .EnhancedGraph import EnhancedGraph
 from typing import Tuple, List, Union, Dict
 import pickle
 from functools import wraps
-from einops import rearrange
+from einops import rearrange, reduce
 
 
 class TopoSolver:
@@ -102,6 +102,7 @@ class TopoSolver:
             "epsilon"
         ]  # Hyperparameter for stability in frequency domain
         self.K0 = params["K0"]  # Assumed sparsity level
+        self.q_star = int(np.ceil(np.ceil(0.05 * self.nu) + (self.K0 / 5 - 1)))
         self.dictionary_type = params["dictionary_type"]
         # Init optimal values for sparse representations and overcomplete dictionary
         self.D_opt: np.ndarray = np.zeros((self.M, self.M * self.P))
@@ -196,20 +197,20 @@ class TopoSolver:
         self.Bu = compute_vandermonde(self.Lu, self.J).real
         self.B = np.hstack([self.Bu, self.Bd])
 
-    def init_hu(self):
-        """
-        Initialize the dictionary coefficients corresponding to the Upper Laplacian
-        to avoid ill-initialization during the learning step of the Upper Laplacian
-        in 'pessimistic' mode
-        """
-        # If find bad intialization, i.e. all zeros we need some action
-        if np.sum(np.abs(self.h_opt[1])) == 0:
-            # Check if the mean of the coefficients for the Lower Laplacian is a good candidate
-            init_val = np.mean(self.h_opt[2])
-            if init_val == 0:
-                self.h_opt[1] = np.full((self.P, self.J), np.max(self.h_opt[2]))
-            else:
-                self.h_opt[1] = np.full((self.P, self.J), init_val)
+    # def init_hu(self):
+    #     """
+    #     Initialize the dictionary coefficients corresponding to the Upper Laplacian
+    #     to avoid ill-initialization during the learning step of the Upper Laplacian
+    #     in 'pessimistic' mode
+    #     """
+    #     # If find bad intialization, i.e. all zeros we need some action
+    #     if np.sum(np.abs(self.h_opt[1])) == 0:
+    #         # Check if the mean of the coefficients for the Lower Laplacian is a good candidate
+    #         init_val = np.mean(self.h_opt[2])
+    #         if init_val == 0:
+    #             self.h_opt[1] = np.full((self.P, self.J), np.max(self.h_opt[2]))
+    #         else:
+    #             self.h_opt[1] = np.full((self.P, self.J), init_val)
 
     def zero_out_h(self):
         # Init the dictionary parameters according to the specific parameterization setup
@@ -229,9 +230,9 @@ class TopoSolver:
             hi = np.zeros((self.P, 1))
             self.h_opt: List[np.ndarray] = [h, hi]
 
-    def default_solver(self, solver, prob):
+    def default_solver(self, solver, prob, solver_params={}):
         self.init_dict(mode="only_X")
-        prob.solve(solver=solver, verbose=False)
+        prob.solve(solver=solver, **solver_params)
 
     @staticmethod
     def _multiplier_search(*arrays, P, c, epsilon):
@@ -643,19 +644,23 @@ class TopoSolver:
                     "ObjScale": -0.5,
                     "BarHomogeneous": 1,
                     "Method": 1,
+                    "verbose": False,
                 }
                 try:
                     # If we are unable to move from starting conditions -> use default solver parameters
                     if pat_iter > 0 and np.all(h_opt == 0):
                         self.default_solver(solver, prob)
                     else:
-                        prob.solve(solver=solver, verbose=False, **solver_params)
+                        prob.solve(solver=solver, **solver_params)
                         # If some solver parameters relax too much the problem -> use default solver parameters
                         if prob.status == "infeasible_or_unbounded":
                             self.default_solver(solver, prob)
-                except:
+
+                except SolverError:
+
+                    # solver_params = {"QCPDual": 0, "verbose": False}
                     # If in any case the solver with tuned parameters fails -> use the default solver parameters
-                    self.default_solver(solver, prob)
+                    self.default_solver(solver, prob, solver_params)
 
                 # Update the dictionary
                 if self.dictionary_type in ["joint", "edge"]:
@@ -760,6 +765,42 @@ class TopoSolver:
 
         return self.min_error_test, self.min_error_train, train_hist, test_hist
 
+    def mtv(self, gt_mask=None):
+        """
+        Min Total Variation algorithm, aimed to find the 'q' best candidate triangles
+        inside our topology. The class uses this function to contrast the bad initialization problem
+        of the coefficient related to the upper laplacian when applying the 'learn_upper_laplacian()'
+        function in 'pessimistic' mode during joint dictionary and topology learning procedure.
+
+        if 'gt_mask' is passed as an argument, the function checks that the selected candidate triangles
+        are actually colored in the true topology.
+        """
+        assert (
+            self.q_star < self.nu
+        ), "The candidate number of triangles should be smaller than the max number of possible colored triangles in the topology"
+
+        vals, Uirr = sla.eig(self.Ld)
+        Uirr = Uirr[:, np.where(vals != 0)[0]]
+        Ysh = np.eye(self.nd) - Uirr @ Uirr.T
+        d = reduce((Ysh.T @ self.B2) ** 2, "m r -> r", "sum")
+        q = np.argsort(d)[: self.q_star]
+
+        if gt_mask != None:
+            true_q = np.where(np.sum(gt_mask, axis=1) != 0)[0]
+            checks = [q_i in true_q for q_i in q]
+            checked = int(np.sum(checks))
+            if checked < self.q_star:
+                print(
+                    f"Warning: {self.q_star-checked} of the {self.q_star} selected candidate triangles are not good!"
+                )
+            else:
+                print("All the selected candidate triangles are good!")
+        filter = np.zeros(self.nu)
+        filter[q] = 1
+        Lu_new = self.B2 @ np.diag(filter) @ self.B2.T
+        self.update_Lu(Lu_new)
+        return filter
+
     def learn_upper_laplacian(
         self,
         Lu_new: np.ndarray = None,
@@ -773,7 +814,7 @@ class TopoSolver:
         mode: str = "optimistic",
         verbose: bool = False,
         warmup: int = 0,
-        on_test: bool = True,
+        on_test: bool = False,
         QP=False,
     ):
 
@@ -788,17 +829,16 @@ class TopoSolver:
             T = self.B2.shape[1]
             self.warmup = warmup
             self.opt_upper = 0
+            # start with a "full" upper Laplacian
             if mode == "optimistic":
                 filter = np.ones(T)
+            # start with an "empty" upper Laplacian
             elif mode == "pessimistic":
-                filter = np.zeros(T)
-                self.update_Lu(
-                    np.zeros(self.Lu.shape)
-                )  # start with an "empty" upper Laplacian
+                filter = self.mtv()
 
         else:
-            if mode == "pessimistic":
-                self.init_hu()
+            # if mode == "pessimistic":
+            #     self.init_hu()
             self.update_Lu(Lu_new)
 
         if QP:
@@ -894,6 +934,23 @@ class TopoSolver:
                 step_h=step_h,
                 step_x=step_x,
                 mode=mode,
+                verbose=verbose,
+                on_test=on_test,
+                QP=QP,
+            )
+
+        if mode == "pessimistic":
+            self.opt_upper = 0
+            return self.learn_upper_laplacian(
+                Lu_new=Lu_new,
+                filter=filter,
+                lambda_=lambda_,
+                max_iter=max_iter,
+                patience=patience,
+                tol=tol,
+                step_h=step_h,
+                step_x=step_x,
+                mode="optimistic",
                 verbose=verbose,
                 on_test=on_test,
                 QP=QP,

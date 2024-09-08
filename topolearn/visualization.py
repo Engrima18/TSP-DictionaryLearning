@@ -6,7 +6,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 from topolearn.utils import save_plot
-from IPython.display import display
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
 @save_plot
@@ -93,11 +93,12 @@ def plot_topology_approx_errors(res_df, **kwargs):
     return my_plt
 
 
+@save_plot
 def plot_changepoints_curve(
     history,
     k0,
     nu,
-    T,
+    p,
     mode: str = "optimistic",
     burn_in: float = 0,
     a=0.1,
@@ -109,8 +110,10 @@ def plot_changepoints_curve(
     include_burn_in=False,
     step_h=1.0,
     step_x=1.0,
+    **kwargs,
 ):
 
+    T = int(np.ceil(nu * (1 - p)))
     start_iter = 0
     end_iter = 0
     change_points = []
@@ -216,6 +219,41 @@ def plot_changepoints_curve(
         my_plt.set_ylabel("Error")
 
     plt.yticks([])
+
+    # Identify the region where y-values change slowly
+    y_diff = np.abs(np.diff(plt_data["y"]))
+    slow_change_indices = np.where(y_diff < 1e-2)[0]
+
+    if len(slow_change_indices) > 0:
+        # Select the first significant region of slow change
+        zoom_start = slow_change_indices[0]
+        zoom_end = slow_change_indices[-1]
+
+        # Create inset axes for zoomed-in region
+        ax_inset = inset_axes(
+            my_plt, width="30%", height="40%", loc="upper right", borderpad=2
+        )
+        sns.lineplot(
+            x=plt_data["x"].iloc[zoom_start:zoom_end],
+            y=plt_data["y"].iloc[zoom_start:zoom_end],
+            estimator=None,
+            sort=False,
+            ax=ax_inset,
+        )
+
+        # Set limits for the zoomed-in region
+        ax_inset.set_xlim(plt_data["x"].iloc[zoom_start], plt_data["x"].iloc[zoom_end])
+        ax_inset.set_ylim(
+            plt_data["y"].iloc[zoom_start:zoom_end].min(),
+            plt_data["y"].iloc[zoom_start:zoom_end].max(),
+        )
+
+        if yscale == "log":
+            ax_inset.set_yscale("log")
+
+        ax_inset.set_xticks([])
+        ax_inset.set_yticks([])
+        ax_inset.set_title("Zoomed-in region", fontsize=10)
     plt.show()
 
 

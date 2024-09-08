@@ -183,6 +183,8 @@ def save_plot(func):
         elif func_name == "plot_learnt_topology":
             file_name = f"learnt_topology_T{int(p*100)}_S{k}.png"
 
+        elif func_name == "plot_changepoints_curve":
+            file_name = f"topocp_learning_curve_T{int(p*100)}_S{k}.png"
         else:
             return plot
 
