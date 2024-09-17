@@ -842,24 +842,45 @@ class TopoSolver:
             self.update_Lu(Lu_new)
 
         if QP:
-            _, _, train_hist, test_hist = self.topological_dictionary_learn_qp(
-                lambda_=lambda_,
-                max_iter=max_iter,
-                patience=patience,
-                tol=tol,
-                step_h=step_h,
-                step_x=step_x,
-                solver="GUROBI",
-            )
+            try:
+                _, _, train_hist, test_hist = self.topological_dictionary_learn_qp(
+                    lambda_=lambda_,
+                    max_iter=max_iter,
+                    patience=patience,
+                    tol=tol,
+                    step_h=step_h,
+                    step_x=step_x,
+                    solver="GUROBI",
+                )
+            except SolverError:
+                return (
+                    self.min_error_train,
+                    self.min_error_test,
+                    self.train_history,
+                    self.test_history,
+                    self.Lu,
+                    self.B2,
+                )
+
         else:
-            _, _, train_hist, test_hist = self.topological_dictionary_learn(
-                lambda_=lambda_,
-                max_iter=max_iter,
-                patience=patience,
-                tol=tol,
-                step_h=step_h,
-                step_x=step_x,
-            )
+            try:
+                _, _, train_hist, test_hist = self.topological_dictionary_learn(
+                    lambda_=lambda_,
+                    max_iter=max_iter,
+                    patience=patience,
+                    tol=tol,
+                    step_h=step_h,
+                    step_x=step_x,
+                )
+            except SolverError:
+                return (
+                    self.min_error_train,
+                    self.min_error_test,
+                    self.train_history,
+                    self.test_history,
+                    self.Lu,
+                    self.B2,
+                )
 
         self.train_history.append(train_hist)
         self.test_history.append(test_hist)
@@ -919,10 +940,10 @@ class TopoSolver:
                         f"Adding {self.opt_upper} triangles to the topology... \n ... The min error: {candidate_error:.3f} !"
                     )
 
-            self.testing_trace[f"{self.opt_upper}"] = (
-                S,
-                Lu_new,
-            )  # return the filter flattened matrix and the new best Lu_new
+            # self.testing_trace[f"{self.opt_upper}"] = (
+            #     S,
+            #     Lu_new,
+            # )  # return the filter flattened matrix and the new best Lu_new
 
             return self.learn_upper_laplacian(
                 Lu_new=Lu_new,
@@ -939,22 +960,23 @@ class TopoSolver:
                 QP=QP,
             )
 
-        if mode == "pessimistic":
-            self.opt_upper = 0
-            return self.learn_upper_laplacian(
-                Lu_new=Lu_new,
-                filter=filter,
-                lambda_=lambda_,
-                max_iter=max_iter,
-                patience=patience,
-                tol=tol,
-                step_h=step_h,
-                step_x=step_x,
-                mode="optimistic",
-                verbose=verbose,
-                on_test=on_test,
-                QP=QP,
-            )
+        # if mode == "pessimistic":
+        #     self.opt_upper = 0
+        #     self.warmup = 1
+        #     return self.learn_upper_laplacian(
+        #         Lu_new=Lu_new,
+        #         filter=filter,
+        #         lambda_=lambda_,
+        #         max_iter=max_iter,
+        #         patience=patience,
+        #         tol=tol,
+        #         step_h=step_h,
+        #         step_x=step_x,
+        #         mode="optimistic",
+        #         verbose=verbose,
+        #         on_test=on_test,
+        #         QP=QP,
+        #     )
 
         self.B2 = self.B2 @ np.diag(filter)
         return (

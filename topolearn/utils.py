@@ -135,12 +135,20 @@ def final_save(func):
         res_dir = "results\\final"
         res, models = func(*args, **kwargs)
         dir = f"max_sparsity{k0}" if mode == "max" else f"random_sparsity{k0}"
-        file_path = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}.pkl"
-
         path = os.getcwd()
         dir_path = os.path.join(path, res_dir, dir)
+
         os.makedirs(dir_path, exist_ok=True)
 
+        if func.__name__ == "dict_and_topology_learning":
+            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}_pess.pkl"
+        elif func.__name__ == "param_dict_learning":
+            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}.pkl"
+        elif func.__name__ == "analyt_dict_learning":
+            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}_analyt.pkl"
+        else:
+            return res, models, file_path
+        file_path = os.path.join(dir_path, filename)
         with open(file_path, "wb") as file:
             pickle.dump(models, file)
             pickle.dump(res, file)
