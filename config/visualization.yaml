@@ -17,3 +17,4 @@ tol: 1e-7
 max_iter: 100
 patience: 5
 topo_learning_mode: "optimistic"
+res_type: "topology" # can take values "analytic", "parametric", "topology"

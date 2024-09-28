@@ -40,7 +40,7 @@ def plot_error_curves(
         "separated": "Separated Hodge Laplacian",
         "complete": "Separated Hodge Laplacian with topology learning",
     }
-    TITLE = [dict_types[typ] for typ in dict_types.keys() if typ in dictionary_type][0]
+    # TITLE = [dict_types[typ] for typ in dict_types.keys() if typ in dictionary_type][0]
     i = 0 if test_error else 1
     res_df = pd.DataFrame()
     for typ in dict_errors.keys():
@@ -69,7 +69,87 @@ def plot_error_curves(
     )
 
     my_plt.set(yscale="log")
-    my_plt.set_title(f"True dictionary: {TITLE}")
+    # my_plt.set_title(f"True dictionary: {TITLE}")
+    xlabel = "Test" if test_error else "Training"
+    my_plt.set_ylabel(f"{xlabel} NMSE (log scale)")
+
+    return my_plt
+
+
+@save_plot
+def plot_analytic_error_curves(
+    analytic_dict_errors,
+    dict_errors,
+    K0_coll,
+    **kwargs,
+) -> plt.Axes:
+    """
+    Plot the test error curves for learning algorithms comparing Fourier, Edge, Joint, and Separated dictionary parametrization.
+
+    Parameters:
+    - k0_coll (List[int]): Collection of sparsity levels.
+    - dictionary_type (str): Type of dictionary used ('fou', 'edge', 'joint', 'sep', 'comp').
+
+    Returns:
+    - plt.Axes: The Axes object of the plot.
+    """
+
+    params = {"dictionary_type": "separated", "prob_T": 1.0, "test_error": True}
+
+    params.update(kwargs)
+    dictionary_type = params["dictionary_type"]
+    prob_T = params["prob_T"]
+    test_error = params["test_error"]
+
+    dict_types = {
+        "fourier": "Fourier",
+        "slepians": "Topological Slepians",
+        "wavelet": "Hodgelet",
+        "separated": "Separated Hodge Laplacian",
+    }
+    # TITLE = [dict_types[typ] for typ in dict_types.keys() if typ in dictionary_type][0]
+    i = 0 if test_error else 1
+    res_df = pd.DataFrame()
+    for typ in analytic_dict_errors.keys():
+        tmp_df = pd.DataFrame(analytic_dict_errors[typ][i])
+        tmp_df.columns = K0_coll
+        tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
+        tmp_df["Method"] = dict_types[typ]
+        res_df = pd.concat([res_df, tmp_df]).reset_index(drop=True)
+
+    for typ in dict_errors.keys():
+        if typ in dict_types.keys():
+            tmp_df = pd.DataFrame(dict_errors[typ][i])
+            tmp_df.columns = K0_coll
+            tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
+            tmp_df["Method"] = dict_types[typ]
+            res_df = pd.concat([res_df, tmp_df]).reset_index(drop=True)
+        else:
+            pass
+
+    markers = [">", "*", "8", "d"]
+    colors1 = sns.color_palette()[: len(dict_types)]
+    colors2 = sns.color_palette("Dark2", 5)
+    c0 = colors2[-2]
+    c1 = colors2[-1]
+    c2 = colors1[0]
+    c3 = colors1[-1]
+    colors1 = [c0, c1, c2, c3]
+    plt.figure(figsize=(10, 6))
+    sns.set_style("whitegrid")
+    my_plt = sns.lineplot(
+        data=res_df,
+        x="Sparsity",
+        y="Error",
+        hue="Method",
+        palette=colors1,
+        markers=markers,
+        dashes=False,
+        style="Method",
+    )
+
+    my_plt.set(yscale="log")
+    # my_plt.set_title(f"True dictionary: {TITLE}")
     xlabel = "Test" if test_error else "Training"
     my_plt.set_ylabel(f"{xlabel} NMSE (log scale)")
 
@@ -269,12 +349,13 @@ def plot_learnt_topology(
     **kwargs,
 ):
 
-    try:
+    if model_pess != None:
+
         topos = [model_gt, model_opt, model_pess]
         num_triangles = [
             model_gt.get_numb_triangles(),
             model_opt.get_numb_triangles("optimistic"),
-            model_pess.get_numb_triangles("pessimistic"),
+            0,
         ]
         incidence_mat = [B2_true, model_opt.B2, model_pess.B2]
         titles = [
@@ -283,7 +364,7 @@ def plot_learnt_topology(
             "Inferred number of triangles (pessimistic method): ",
         ]
         _, axs = plt.subplots(1, 3, figsize=(16, 6))
-    except:
+    else:
         topos = [model_gt, model_opt]
         num_triangles = [
             model_gt.get_numb_triangles(),
@@ -297,13 +378,12 @@ def plot_learnt_topology(
         _, axs = plt.subplots(1, 2, figsize=(12, 6))
 
     i = 0
-
+    print(f"Num models:{len(titles)}")
     for ax, title in zip(axs, titles):
         A = G_true.get_adjacency()
         tmp_G = nx.from_numpy_array(A)
         pos = nx.kamada_kawai_layout(tmp_G)
         nx.draw(tmp_G, pos, with_labels=False, node_color="purple", node_size=15, ax=ax)
-        # num_triangles = 0
 
         for triangle_index in range(B2_true.shape[1]):
             np.random.seed(triangle_index)
@@ -320,7 +400,8 @@ def plot_learnt_topology(
                         if pos2 not in triangle_vertices:
                             triangle_vertices.append(pos2)
             if triangle_vertices != []:
-                # num_triangles += 1
+                if "pessimistic" in title:
+                    num_triangles[-1] += 1
                 triangle_patch = Polygon(
                     triangle_vertices,
                     closed=True,
@@ -334,8 +415,8 @@ def plot_learnt_topology(
         ax.text(
             0.5,
             -0,
-            r"$||L_u - \hat{L}_u^*||^2$:"
-            + f" {topos[i].get_topology_approx_error(Lu_true, 4)}         NMSE: {topos[i].get_test_error(4)}",
+            r"$\frac{||L_u - \hat{L}_u^*||^2}{||L_u||^2}$:"
+            + f" {topos[i].get_topology_approx_error(Lu_true, 4)/np.linalg.norm(Lu_true)}         NMSE: {topos[i].get_test_error(4)}",
             ha="center",
             transform=ax.transAxes,
         )

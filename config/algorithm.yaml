@@ -9,6 +9,6 @@ verbose: True
 QP: True
 warmup: 2
 on_test: False
-topo_learning_mode: "pessimistic"
-complete: False
+topo_learning_mode: "optimistic"
+complete: True
 both: False

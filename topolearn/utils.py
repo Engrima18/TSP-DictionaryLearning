@@ -141,11 +141,11 @@ def final_save(func):
         os.makedirs(dir_path, exist_ok=True)
 
         if func.__name__ == "dict_and_topology_learning":
-            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}_pess.pkl"
+            filename = f"res_{d}_T{int(prob_T*100)}_pess.pkl"
         elif func.__name__ == "param_dict_learning":
-            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}.pkl"
+            filename = f"res_{d}_T{int(prob_T*100)}.pkl"
         elif func.__name__ == "analyt_dict_learning":
-            filename = f"results\\final\\{dir}\\res_{d}_T{int(prob_T*100)}_analyt.pkl"
+            filename = f"res_{d}_T{int(prob_T*100)}_analyt.pkl"
         else:
             return res, models, file_path
         file_path = os.path.join(dir_path, filename)
@@ -176,6 +176,7 @@ def save_plot(func):
         k0 = kwargs.get("sparsity", 20)
         k = kwargs.get("algo_sparsity", 20)
         mode = kwargs.get("sparsity_mode", "max")
+        learn_mode = kwargs.get("mode", "optimistic")
         dir_name += f"\\max_sparsity{k0}" if mode == "max" else f"\\random_sparsity{k0}"
 
         if func_name == "plot_error_curves":
@@ -192,7 +193,14 @@ def save_plot(func):
             file_name = f"learnt_topology_T{int(p*100)}_S{k}.png"
 
         elif func_name == "plot_changepoints_curve":
-            file_name = f"topocp_learning_curve_T{int(p*100)}_S{k}.png"
+            if learn_mode == "optimistic":
+                file_name = f"topocp_learning_curve_T{int(p*100)}_S{k}.png"
+            else:
+                file_name = f"topocp_learning_curve_T{int(p*100)}_S{k}_pess.png"
+
+        elif func_name == "plot_analytic_error_curves":
+            file_name = f"test_error_{d}_T{int(p*100)}_analyt.png"
+
         else:
             return plot
 

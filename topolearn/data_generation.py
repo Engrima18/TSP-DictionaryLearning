@@ -22,8 +22,11 @@ def compute_Lj_and_lambdaj(
     Returns:
     - Tuple[np.ndarray, np.ndarray, np.ndarray]: Tuple containing Lj, lambda_max_k, and lambda_min_k.
     """
-
-    lambdas, _ = eigs(L)
+    try:
+        lambdas, _ = eigs(L)
+    except:
+        L = np.array(L, dtype=float)
+        lambdas, _ = eigs(L)
     lambdas[np.abs(lambdas) < np.finfo(float).eps] = 0
     lambda_max = np.max(lambdas).real
     lambda_min = np.min(lambdas).real

@@ -254,7 +254,7 @@ def main(cfg: DictConfig):
 
     print("Starting the learning algorithm...")
 
-    _, _, results_path = nonparam_dict_learning(
+    _, _, results_path = analyt_dict_learning(
         X_train=X_train,
         X_test=X_test,
         Y_train=Y_train,

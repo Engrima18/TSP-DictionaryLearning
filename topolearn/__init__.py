@@ -14,6 +14,7 @@ __all__ = [
     "plot_changepoints_curve",
     "plot_topology_approx_errors",
     "plot_algo_errors",
+    "plot_analytic_error_curves",
     "plot_learnt_topology",
     "complete_learning_test",
     "simulate_learnable_vs_analytic_dict",

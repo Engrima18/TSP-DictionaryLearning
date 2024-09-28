@@ -1,4 +1,5 @@
 import scipy.linalg as sla
+import scipy.sparse.linalg as ssla
 import numpy as np
 import numpy.linalg as la
 import cvxpy as cp
@@ -36,6 +37,8 @@ class TopoSolver:
             "diff_order_irr": 1,  ####
             "step_prog": 1,  ####
             "top_k_slepians": 2,  ####
+            "B1_true": None,
+            "B2_true": None,
         }
 
         self.testing_trace = (
@@ -71,15 +74,28 @@ class TopoSolver:
         else:
             self.G = params["G_true"]
 
-        # Incidence matrices
-        self.B1: np.ndarray = self.G.get_b1()
-        self.B2: np.ndarray = self.G.get_b2()
+        if np.all(params["B1_true"] == None):
 
-        # Sub-sampling if needed to decrease complexity
-        if params["sub_size"] != None:
-            self.B1 = self.B1[:, : params["sub_size"]]
-            self.B2 = self.B2[: params["sub_size"], :]
-            self.B2 = self.B2[:, np.sum(np.abs(self.B2), 0) == 3]
+            # Incidence matrices
+            self.B1: np.ndarray = self.G.get_b1()
+            self.B2: np.ndarray = self.G.get_b2()
+
+            # Sub-sampling if needed to decrease complexity
+            if params["sub_size"] != None:
+                self.B1 = self.B1[:, : params["sub_size"]]
+                self.B2 = self.B2[: params["sub_size"], :]
+                self.B2 = self.B2[:, np.sum(np.abs(self.B2), 0) == 3]
+            # Laplacians according to the Hodge Theory for cell complexes
+            Lu, Ld, L = self.G.get_laplacians(sub_size=params["sub_size"])
+            self.Lu: np.ndarray = Lu  # Upper Laplacian
+            self.Ld: np.ndarray = Ld  # Lower Laplacian
+            self.L: np.ndarray = L  # Sum Laplacian
+        else:
+            self.B1 = params["B1_true"]
+            self.B2 = params["B2_true"]
+            self.Ld = (self.B1.T) @ self.B1
+            self.Lu = self.B2 @ self.B2.T
+            self.L = self.Lu + self.Ld
 
         # Topology dimensions and hyperparameters
         self.nu: int = self.B2.shape[1]
@@ -87,33 +103,29 @@ class TopoSolver:
         self.true_prob_T = params["true_prob_T"]
         self.T: int = int(np.ceil(self.nu * (1 - self.true_prob_T)))
 
-        # Laplacians according to the Hodge Theory for cell complexes
-        Lu, Ld, L = self.G.get_laplacians(sub_size=params["sub_size"])
-        self.Lu: np.ndarray = Lu  # Upper Laplacian
-        self.Ld: np.ndarray = Ld  # Lower Laplacian
-        self.L: np.ndarray = L  # Sum Laplacian
-        self.M = L.shape[0]
-
-        # Dictionary hyperparameters
-        self.P = params["P"]  # Number of sub-dicts
-        self.J = params["J"]  # Polynomial order for the Hodge Laplacian
-        self.c = params["c"]  # Hyperparameter for stability in frequency domain
-        self.epsilon = params[
-            "epsilon"
-        ]  # Hyperparameter for stability in frequency domain
-        self.K0 = params["K0"]  # Assumed sparsity level
-        self.q_star = int(np.ceil(np.ceil(0.05 * self.nu) + (self.K0 / 5 - 1)))
+        self.M = self.L.shape[0]
         self.dictionary_type = params["dictionary_type"]
-        # Init optimal values for sparse representations and overcomplete dictionary
-        self.D_opt: np.ndarray = np.zeros((self.M, self.M * self.P))
-        self.X_opt_train: np.ndarray = np.zeros(self.X_train.shape)
-        self.X_opt_test: np.ndarray = np.zeros(self.X_test.shape)
+
         # Init the learning errors and error curve (history)
         self.min_error_train = 1e20
         self.min_error_test = 1e20
         self.train_history: List[np.ndarray] = []
         self.test_history: List[np.ndarray] = []
         self.opt_upper = 0
+
+        # Dictionary hyperparameters
+        self.P = params["P"]  # Number of sub-dicts
+        self.J = params["J"]  # Polynomial order for the Hodge Laplacian
+
+        # Assumed sparsity level
+        self.K0 = params["K0"]
+        self.q_star = int(np.ceil(np.ceil(0.05 * self.nu) + (self.K0 / 5 - 1)))
+        # Init optimal values for sparse representations and overcomplete dictionary
+        self.D_opt: np.ndarray = np.zeros((self.M, self.M * self.P))
+        self.X_opt_train: np.ndarray = np.zeros(
+            (self.M * self.P, self.Y_train.shape[1])
+        )
+        self.X_opt_test: np.ndarray = np.zeros((self.M * self.P, self.Y_test.shape[1]))
 
         ############################################################################################################
         ##                                                                                                        ##
@@ -188,6 +200,14 @@ class TopoSolver:
             # Remember that this part should be updated if B2 or Lu are updated!
             self.w1 = np.linalg.eigvalsh(self.Lu)
             self.w2 = np.linalg.eigvalsh(self.Ld)
+
+        if self.dict_is_learnable:
+            # Hyperparameters for dictionary stability in frequency domain
+            if params["c"] != None:
+                self.c = params["c"]
+                self.epsilon = params["epsilon"]
+            else:
+                self.spectral_control_params()
 
     def update_Lu(self, Lu_new):
         self.Lu = Lu_new
@@ -291,7 +311,7 @@ class TopoSolver:
         Returns:
             Tuple[np.ndarray, np.ndarray, bool]: Initialized dictionary, initialized sparse representation, and discard flag value.
         """
-
+        self.min_error_train, self.min_error_test = 1e20, 1e20
         self.zero_out_h()
 
         # If no prior info on the dictionary
@@ -603,10 +623,9 @@ class TopoSolver:
             reg = lambda_ * np.eye(self.P * (f * self.J + 1))
             I_s = cp.Constant(np.eye(self.P))
             i_s = cp.Constant(np.ones((self.P, 1)))
-            B = cp.Constant(self.B)
+            B = cp.Constant(self.B.real)
 
             while pat_iter < patience and iter_ <= max_iter:
-
                 # Init variables and parameters
                 h = cp.Variable((self.P * (f * self.J + 1), 1))
                 self._aux_matrix_update(X_tr)
@@ -649,6 +668,7 @@ class TopoSolver:
                 try:
                     # If we are unable to move from starting conditions -> use default solver parameters
                     if pat_iter > 0 and np.all(h_opt == 0):
+                        print(1)
                         self.default_solver(solver, prob)
                     else:
                         prob.solve(solver=solver, **solver_params)
@@ -657,8 +677,7 @@ class TopoSolver:
                             self.default_solver(solver, prob)
 
                 except SolverError:
-
-                    # solver_params = {"QCPDual": 0, "verbose": False}
+                    solver_params = {"QCPDual": 0, "verbose": False}
                     # If in any case the solver with tuned parameters fails -> use the default solver parameters
                     self.default_solver(solver, prob, solver_params)
 
@@ -725,7 +744,7 @@ class TopoSolver:
 
             if self.dictionary_type == "fourier":
                 # Fourier Dictionary Benchmark
-                _, self.D_opt = sla.eigh(self.L)
+                _, self.D_opt = sla.eig(self.L)
 
             elif self.dictionary_type == "slepians":
                 SS = SimplicianSlepians(
@@ -917,6 +936,7 @@ class TopoSolver:
         candidate_error = sigmas.NMSE.min()
         current_min = self.min_error_test if on_test else self.min_error_train
         idx_min = sigmas.NMSE.idxmin()
+        self.testing_trace[f"{self.opt_upper}"] = (sigmas, current_min, candidate_error)
         # If in warmup look at the third decimal point
         if self.warmup > 0:
             candidate_error = int(candidate_error * 1000)
@@ -1221,3 +1241,34 @@ class TopoSolver:
         Lu_approx_error = self.get_topology_approx_error(Lu_true=Lu_true)
 
         return self.min_error_train, self.min_error_test, Lu_approx_error
+
+    def spectral_control_params(self, num=20, verbose=False):
+        L = self.Ld if self.dictionary_type == "edge" else self.L
+        vals, _ = sla.eig(L)
+        c_in = np.sort(vals)[-1].real
+        e_in = np.std(vals).real
+        c_end = c_in**self.J
+        e_end = e_in**self.J
+
+        c_space = np.linspace(c_in, c_end, num=num)
+        e_space = np.linspace(e_in, e_end, num=num)
+
+        current_min = self.min_error_test
+        best_c = None
+        best_eps = None
+        for e, c in zip(c_space, e_space):
+            self.epsilon = e
+            self.c = c
+            self.init_dict(mode="only_X")
+            self.topological_dictionary_learn_qp(lambda_=1e-7, max_iter=1)
+            if self.min_error_test < current_min:
+                # best_c = self.c
+                # best_eps = self.e
+                current_min = self.min_error_test
+
+        # self.c = best_c
+        # self.epsilon = best_eps
+
+        if verbose:
+            print(f"Best c {self.c}")
+            print(f"Best eps {self.epsilon}")
