@@ -177,6 +177,8 @@ def save_plot(func):
         k = kwargs.get("algo_sparsity", 20)
         mode = kwargs.get("sparsity_mode", "max")
         learn_mode = kwargs.get("mode", "optimistic")
+        j = kwargs.get("j", 2)
+        P = kwargs.get("p", 3)
         dir_name += f"\\max_sparsity{k0}" if mode == "max" else f"\\random_sparsity{k0}"
 
         if func_name == "plot_error_curves":
@@ -185,12 +187,22 @@ def save_plot(func):
                 if te
                 else f"train_error_{d}_T{int(p*100)}.png"
             )
+        elif func_name == "plot_error_curves_real":
+            file_name = f"test_error_real_J{j}P{P}.png"
+            dir_name = "plots\\real"
 
         elif func_name == "plot_topology_approx_errors":
             file_name = "topology_approx_error.png"
 
+        elif func_name == "plot_topology_approx_errors_dual":
+            file_name = "topology_approx_error_dual.png"
+
         elif func_name == "plot_learnt_topology":
             file_name = f"learnt_topology_T{int(p*100)}_S{k}.png"
+
+        elif func_name == "plot_learnt_topology_real":
+            file_name = f"learnt_topology_S{k}_real.png"
+            dir_name = "plots\\real"
 
         elif func_name == "plot_changepoints_curve":
             if learn_mode == "optimistic":

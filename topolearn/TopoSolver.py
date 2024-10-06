@@ -32,11 +32,11 @@ class TopoSolver:
             "p_edges": 1.0,  # Probability of edge existence
             "G_true": None,
             "seed": None,  ####
-            "option": "One-shot-diffusion",  ####
-            "diff_order_sol": 1,  ####
-            "diff_order_irr": 1,  ####
-            "step_prog": 1,  ####
-            "top_k_slepians": 2,  ####
+            "option": "One-shot-diffusion",
+            "diff_order_sol": 1,
+            "diff_order_irr": 1,
+            "step_prog": 1,
+            "top_k_slepians": 10,
             "B1_true": None,
             "B2_true": None,
         }
@@ -178,7 +178,6 @@ class TopoSolver:
             self.source_irr = np.ones((self.nd,))
             self.top_K_slepians = params["top_k_slepians"]
             self.spars_level = list(range(10, 80, 10))
-            # Remember that this part should be updated if B2 or Lu are updated!
             self.F_sol, self.F_irr = get_frequency_mask(
                 self.B1, self.B2
             )  # Get frequency bands
@@ -630,7 +629,6 @@ class TopoSolver:
                 h = cp.Variable((self.P * (f * self.J + 1), 1))
                 self._aux_matrix_update(X_tr)
                 h.value = h_opt
-
                 Q = cp.Constant(
                     np.einsum("imn, lmn -> il", self.P_aux, self.P_aux) + reg
                 )
@@ -739,12 +737,18 @@ class TopoSolver:
 
                 iter_ += 1
 
-        # Analytic Dictionary -> directly go to OMP step
+        # Analytic dictionary directly go for the OMP step
         else:
 
+            fit_intercept = True
+
+            # Topological Fourier Dictionary
             if self.dictionary_type == "fourier":
-                # Fourier Dictionary Benchmark
                 _, self.D_opt = sla.eig(self.L)
+
+            # Classical Fourier Dictionary
+            elif self.dictionary_type == "classic_fourier":
+                self.D_opt = sla.dft(self.nd).real
 
             elif self.dictionary_type == "slepians":
                 SS = SimplicianSlepians(
@@ -756,6 +760,7 @@ class TopoSolver:
                     top_K=self.top_K_slepians,
                 )
                 self.D_opt = SS.atoms_flat
+                fit_intercept = False
 
             elif self.dictionary_type == "wavelet":
                 SH = SeparateHodgelet(
@@ -765,11 +770,12 @@ class TopoSolver:
                     *log_wavelet_kernels_gen(3, 4, np.log(np.max(self.w2))),
                 )
                 self.D_opt = SH.atoms_flat
+                fit_intercept = False
                 # print(self.D_opt.shape)
 
             # OMP
             self.X_opt_test, self.X_opt_train = sparse_transform(
-                self.D_opt, self.K0, self.Y_test, self.Y_train
+                self.D_opt, self.K0, self.Y_test, self.Y_train, fit_intercept
             )
             # Error Updating
             self.min_error_train = nmse(
@@ -1242,7 +1248,7 @@ class TopoSolver:
 
         return self.min_error_train, self.min_error_test, Lu_approx_error
 
-    def spectral_control_params(self, num=20, verbose=False):
+    def spectral_control_params(self, num=20, verbose=True):
         L = self.Ld if self.dictionary_type == "edge" else self.L
         vals, _ = sla.eig(L)
         c_in = np.sort(vals)[-1].real
@@ -1254,17 +1260,18 @@ class TopoSolver:
         e_space = np.linspace(e_in, e_end, num=num)
 
         current_min = self.min_error_test
-        best_c = None
-        best_eps = None
-        for e, c in zip(c_space, e_space):
-            self.epsilon = e
-            self.c = c
-            self.init_dict(mode="only_X")
-            self.topological_dictionary_learn_qp(lambda_=1e-7, max_iter=1)
-            if self.min_error_test < current_min:
-                # best_c = self.c
-                # best_eps = self.e
-                current_min = self.min_error_test
+        # best_c = None
+        # best_eps = None
+        for e in e_space:
+            for c in c_space:
+                self.epsilon = e
+                self.c = c
+                self.init_dict(mode="only_X")
+                self.topological_dictionary_learn_qp(lambda_=1e-7, max_iter=1)
+                if self.min_error_test < current_min:
+                    # best_c = self.c
+                    # best_eps = self.e
+                    current_min = self.min_error_test
 
         # self.c = best_c
         # self.epsilon = best_eps

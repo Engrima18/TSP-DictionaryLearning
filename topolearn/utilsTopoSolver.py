@@ -30,31 +30,48 @@ def split_coeffs(h, s, k, sep=False):
     # hS = h_tmp[s:s*(k+1),].reshape((s,k))
     # hI = h_tmp[s*(k+1):,].reshape((s,k))
     if sep:
-        hH = h_tmp[np.arange(0, (s * (2 * k + 1)), (2 * k + 1))].reshape((s, 1))
-        hS = h_tmp[
-            np.hstack([[i, i + 1] for i in range(1, (s * (2 * k + 1)), (2 * k + 1))])
-        ].reshape((s, k))
-        hI = h_tmp[
-            np.hstack(
-                [[i, i + 1] for i in range((k + 1), (s * (2 * k + 1)), (2 * k + 1))]
-            )
-        ].reshape((s, k))
+        if s != 1 and k != 1:
+            hH = h_tmp[np.arange(0, (s * (2 * k + 1)), (2 * k + 1))].reshape((s, 1))
+            hS = h_tmp[
+                np.hstack(
+                    [[i, i + 1] for i in range(1, (s * (2 * k + 1)), (2 * k + 1))]
+                )
+            ].reshape((s, k))
+            hI = h_tmp[
+                np.hstack(
+                    [[i, i + 1] for i in range((k + 1), (s * (2 * k + 1)), (2 * k + 1))]
+                )
+            ].reshape((s, k))
+        else:
+            hH = h_tmp[np.arange(0, (s * (2 * k)), (2 * k))]
+            hS = h_tmp[
+                np.hstack([[i, i + 1] for i in range(1, (s * (2 * k)), (2 * k))])
+            ]
+            hI = h_tmp[
+                np.hstack([[i, i + 1] for i in range((k), (s * (2 * k)), (2 * k))])
+            ]
         return [hH, hS, hI]
-    hi = h_tmp[np.arange(0, (s * (k + 1)), (k + 1))].reshape((s, 1))
-    h = h_tmp[
-        np.hstack([[i, i + 1] for i in range(1, (s * (k + 1)), (k + 1))])
-    ].reshape((s, k))
+    if s != 1 and k != 1:
+        hi = h_tmp[np.arange(0, (s * (k + 1)), (k + 1))].reshape((s, 1))
+        h = h_tmp[
+            np.hstack([[i, i + 1] for i in range(1, (s * (k + 1)), (k + 1))])
+        ].reshape((s, k))
+    else:
+        hi = h_tmp[np.arange(0, (s * k), k)]
+        h = h_tmp[np.hstack([[i, i + 1] for i in range(1, (s * k), k)])]
     return np.hstack([h, hi])
 
 
-def sparse_transform(D, K0, Y_te, Y_tr=None):
+def sparse_transform(D, K0, Y_te, Y_tr=None, fit_intercept=True):
 
     ep = np.finfo(float).eps  # to avoid some underflow problems
     dd = la.norm(D, axis=0) + ep
     W = np.diag(1.0 / dd)
     Domp = D @ W
     X_te = np.apply_along_axis(
-        lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_te
+        lambda x: get_omp_coeff(K0, Domp=Domp, col=x, fit_intercept=fit_intercept),
+        axis=0,
+        arr=Y_te,
     )
     # Normalization
     X_te = W @ X_te
@@ -65,7 +82,9 @@ def sparse_transform(D, K0, Y_te, Y_tr=None):
 
     # Same for the training set
     X_tr = np.apply_along_axis(
-        lambda x: get_omp_coeff(K0, Domp=Domp, col=x), axis=0, arr=Y_tr
+        lambda x: get_omp_coeff(K0, Domp=Domp, col=x, fit_intercept=fit_intercept),
+        axis=0,
+        arr=Y_tr,
     )
     X_tr = W @ X_tr
 

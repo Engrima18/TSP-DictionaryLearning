@@ -240,7 +240,9 @@ def create_ground_truth(
     return D, h, train_Y, test_Y, epsilon, c, X_train, X_test
 
 
-def get_omp_coeff(K0: int, Domp: np.ndarray, col: np.ndarray) -> np.ndarray:
+def get_omp_coeff(
+    K0: int, Domp: np.ndarray, col: np.ndarray, fit_intercept: bool = True
+) -> np.ndarray:
     """
     Compute the coefficients using Orthogonal Matching Pursuit.
 
@@ -253,7 +255,8 @@ def get_omp_coeff(K0: int, Domp: np.ndarray, col: np.ndarray) -> np.ndarray:
         np.ndarray: Coefficients.
     """
 
-    omp = OrthogonalMatchingPursuit(n_nonzero_coefs=K0)
+    omp = OrthogonalMatchingPursuit(n_nonzero_coefs=K0, fit_intercept=fit_intercept)
+
     omp.fit(Domp, col)
     return omp.coef_
 
