@@ -78,15 +78,10 @@ The core class of the project is TopoSolver, located in the topolearn module. Th
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/yourrepositoryname.git
-cd yourrepositoryname
+git clone https://github.com/Engrima18/TSP-DictionaryLearning
+cd TSP-DictionaryLearning
 ```
 
 ### Setup Environment
 
 ## Used technologies
-
-Il progetto è interamente scritto in Python. Tutto è il codice è reperibile alla corrispondente repository github, dove è possibile trovare due folder principali : topolearn contentente il modulo con le funzioni e le classi fondamentali per l'implementazione dell'algoritmo proposto, e experiments dove è sono contenuti gli script in grado di fornire i risultati numerici su dati sintetici e dati reali riportati nella tesi.
-è possibile scaricare sia il dataset reale che quelli generati sinteticamente nelle corrispettive cartelle della repository.
-
-La classe principale è TopoSolver, contenuta nel modulo topolearn. Tale classe gestisce sia le procdure di dictionary learning e joint topology e dictionary learning introdotte in questo lavoro, sia la sparse representation con dizionari analitici quali Slepians e Hodgelets. Per l'ottimizzazione tramite algoritmo a direzioni alternate usiamo il solver MOSEK nel caso SDP e GUROBI per la riformulazione in problema quadratico, entrambi i solver sono gestiti tramite API della libreria CVXPY
