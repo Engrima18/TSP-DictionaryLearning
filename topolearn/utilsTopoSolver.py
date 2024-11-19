@@ -62,6 +62,26 @@ def split_coeffs(h, s, k, sep=False):
     return np.hstack([h, hi])
 
 
+def rearrange_coeffs(h, J, P, sep=False):
+    h_tmp = h.value.flatten()
+    if sep:
+        base_idxs = np.arange(0, (P * (2 * J + 1)), (2 * J + 1))
+        hH = h_tmp[base_idxs].reshape((P, 1))
+        hS = h_tmp[
+            np.hstack([np.arange((i + 1), (i + 1 + J)) for i in base_idxs])
+        ].reshape((P, J))
+        hI = h_tmp[
+            np.hstack([np.arange((i + 1 + J), (i + 1 + 2 * J)) for i in base_idxs])
+        ].reshape((P, J))
+        return [hH, hS, hI]
+    base_idxs = np.arange(0, (P * (J + 1)), (J + 1))
+    hi = h_tmp[base_idxs].reshape((P, 1))
+    h = h_tmp[np.hstack([np.arange((i + 1), (i + 1 + J)) for i in base_idxs])].reshape(
+        (P, J)
+    )
+    return np.hstack([h, hi])
+
+
 def sparse_transform(D, K0, Y_te, Y_tr=None, fit_intercept=True):
 
     ep = np.finfo(float).eps  # to avoid some underflow problems

@@ -1,7 +1,6 @@
 from .data_generation import generate_data
 from .TopoSolver import TopoSolver
 from .EnhancedGraph import EnhancedGraph
-from .tsp_learn import *
 from .visualization import *
 from .utils import final_save
 from .test import test
@@ -19,8 +18,8 @@ __all__ = [
     "plot_analytic_error_curves",
     "plot_learnt_topology",
     "plot_learnt_topology_real",
-    "complete_learning_test",
-    "simulate_learnable_vs_analytic_dict",
+    # "complete_learning_test",
+    # "simulate_learnable_vs_analytic_dict",
     "final_save",
-    "test",
+    # "test",
 ]

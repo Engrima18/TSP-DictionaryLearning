@@ -581,17 +581,18 @@ class TopoSolver:
 
         I = [np.eye(self.M)]
         if self.dictionary_type == "separated":
-            LLu = [lu for lu in self.Luj]
-            LLd = [ld for ld in self.Ldj]
-            LL = np.array(I + LLu + LLd)
+            # LLu = [lu for lu in self.Luj]
+            # LLd = [ld for ld in self.Ldj]
+            # LL = np.array(I + LLu + LLd)
+            LL = np.concatenate((I, self.Luj, self.Ldj))
         else:
-            LL = [l for l in self.Lj]
-            LL = np.array(I + LL)
-
-        P_aux = np.array(
+            # LL = [l for l in self.Lj]
+            # LL = np.array(I + LL)
+            LL = np.concatenate((I, self.Lj))
+        self.P_aux = np.array(
             [LL @ X[(i * self.M) : ((i + 1) * self.M), :] for i in range(self.P)]
         )
-        self.P_aux = rearrange(P_aux, "b h w c -> (b h) w c")
+        self.P_aux = rearrange(self.P_aux, "b h w c -> (b h) w c")
 
     def topological_dictionary_learn_qp(
         self,
@@ -666,7 +667,6 @@ class TopoSolver:
                 try:
                     # If we are unable to move from starting conditions -> use default solver parameters
                     if pat_iter > 0 and np.all(h_opt == 0):
-                        print(1)
                         self.default_solver(solver, prob)
                     else:
                         prob.solve(solver=solver, **solver_params)
@@ -681,14 +681,12 @@ class TopoSolver:
 
                 # Update the dictionary
                 if self.dictionary_type in ["joint", "edge"]:
-                    h_list = split_coeffs(h, self.P, self.J)
-                    # print(h_tmp.shape)
+                    h_list = rearrange_coeffs(h, self.J, self.P)
                     # h_tmp = h.value.reshape(self.P, self.J+1)
                     D = generate_dictionary(h_list, self.P, self.Lj)
                     h_opt = h_opt + step_h * (h.value - h_opt)
                 else:
-
-                    h_list = split_coeffs(h, self.P, self.J, sep=True)
+                    h_list = rearrange_coeffs(h, self.J, self.P, sep=True)
                     D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)
                     h_opt = h_opt + step_h * (h.value - h_opt)
 
@@ -724,7 +722,6 @@ class TopoSolver:
                     self.h_opt = (
                         h_list if self.dictionary_type == "separated" else h_opt
                     )
-
                     self.D_opt = D
                     self.X_opt_test = X_te
                     self.min_error_test = error_test
@@ -867,6 +864,7 @@ class TopoSolver:
             self.update_Lu(Lu_new)
 
         if QP:
+
             try:
                 _, _, train_hist, test_hist = self.topological_dictionary_learn_qp(
                     lambda_=lambda_,
@@ -877,6 +875,7 @@ class TopoSolver:
                     step_x=step_x,
                     solver="GUROBI",
                 )
+
             except SolverError:
                 return (
                     self.min_error_train,
