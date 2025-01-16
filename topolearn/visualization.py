@@ -50,7 +50,8 @@ def plot_error_curves(
         tmp_df = pd.DataFrame(dict_errors[typ][i])
         tmp_df.columns = K0_coll
         tmp_df = tmp_df.melt(var_name="Sparsity", value_name="Error")
-        tmp_df["Method"] = dict_types[typ]
+        tmp_df["Method"] = dict_types[typ] if typ in dict_types.keys() else None
+        pass
         res_df = pd.concat([res_df, tmp_df]).reset_index(drop=True)
 
     markers = (
@@ -161,10 +162,7 @@ def plot_error_curves(
 
 
 @save_plot
-def plot_error_curves_real(
-    dict_errors,
-    K0_coll,
-) -> plt.Axes:
+def plot_error_curves_real(dict_errors, K0_coll, **kwargs) -> plt.Axes:
     """
     Plot the test error curves for learning algorithms comparing Fourier, Edge, Joint, and Separated dictionary parametrization.
 
@@ -310,12 +308,14 @@ def plot_analytic_error_curves(
 
 
 @save_plot
-def plot_topology_approx_errors(res_df, Lu_true, log_scale=True, **kwargs):
+def plot_topology_approx_errors(res_df, K0_coll, log_scale=True, **kwargs):
 
     sns.set(font_scale=1)
-    denom = np.linalg.norm(Lu_true)
+    print(res_df)
+    mask = res_df["Sparsity"].isin(K0_coll)
+    # Filter the original dataframe to retain only useful info
+    res_df = res_df[mask]
     res_df = res_df.reset_index()
-    res_df["Error"] /= denom
     my_plt = sns.lineplot(
         data=res_df,
         x="Sparsity",
@@ -338,12 +338,13 @@ def plot_topology_approx_errors(res_df, Lu_true, log_scale=True, **kwargs):
 
 
 @save_plot
-def plot_topology_approx_errors_dual(res_df, Lu_true, log_scale=True, **kwargs):
+def plot_topology_approx_errors_dual(res_df, K0_coll, log_scale=True, **kwargs):
 
     sns.set(font_scale=1)
-    denom = np.linalg.norm(Lu_true)
+    mask = res_df["Sparsity"].isin(K0_coll)
+    # Filter the original dataframe to retain only useful info
+    res_df = res_df[mask]
     res_df = res_df.reset_index()
-    res_df["Error"] /= denom
     my_plt = sns.lineplot(
         data=res_df,
         x="Number of Triangles",
@@ -375,16 +376,17 @@ def plot_changepoints_curve(
     c=0.9,
     d=0.01,
     yscale: str = "log",
+    zoom_region: bool = True,
     sparse_plot=False,
     include_burn_in=False,
     change_region_len=3,
     **kwargs,
 ):
 
-    mode = kwargs.get("mode", "optimistic")
-    p = kwargs.get("prob_T")
-    k0 = kwargs.get("algo_sparsity")
-    T = int(np.ceil(nu * (1 - p)))
+    # mode = kwargs.get("mode", "optimistic")
+    # p = kwargs.get("prob_T")
+    # k0 = kwargs.get("algo_sparsity")
+    # T = int(np.ceil(nu * (1 - p)))
     start_iter = 0
     end_iter = 0
     change_points = []
@@ -396,14 +398,17 @@ def plot_changepoints_curve(
     for i, h in enumerate(history):
         if i == 0:
             burn_in_iter = int(np.ceil(burn_in * len(h)))
-        his += h
-        end_iter += len(h) - 1
-        tmp = range(start_iter, end_iter + 1)
-        xx += tmp
-        start_iter = end_iter
-        change_points.append(end_iter)
-        change_points_y1.append(h[-1])
-        change_points_y2.append(h[0])
+        if h != []:
+            his += h
+            end_iter += len(h) - 1
+            tmp = range(start_iter, end_iter + 1)
+            xx += tmp
+            start_iter = end_iter
+            change_points.append(end_iter)
+            change_points_y1.append(h[-1])
+            change_points_y2.append(h[0])
+        else:
+            pass
 
     plt_data = pd.DataFrame({"y": his[burn_in_iter:], "x": xx[burn_in_iter:]})
 
@@ -417,17 +422,17 @@ def plot_changepoints_curve(
 
     my_plt = sns.lineplot(x=plt_data["x"], y=plt_data["y"], estimator=None, sort=False)
 
-    labels = (
-        ("removing", "Optimistic")
-        if mode == "optimistic"
-        else ("adding", "Pessimistic")
-    )
-    operation = "from" if mode == "optimistic" else "to"
+    # labels = (
+    #     ("removing", "Optimistic")
+    #     if mode == "optimistic"
+    #     else ("adding", "Pessimistic")
+    # )
+    # operation = "from" if mode == "optimistic" else "to"
     # Change-points
     sns.scatterplot(
         x=np.hstack([change_points, change_points]),
         y=np.hstack([change_points_y1, change_points_y2]),
-        label=f"Change Point: optimally {labels[0]} \n a triangle {operation} Upper Laplacian.",
+        # label=f"Change Point: optimally {labels[0]} \n a triangle {operation} Upper Laplacian.",
         color="purple",
         marker="d",
     )
@@ -467,15 +472,15 @@ def plot_changepoints_curve(
             fontsize=15,
             color="gray",
         )
-    ni = nu - change_points.shape[0] if mode == "optimistic" else change_points.shape[0]
+    # ni = nu - change_points.shape[0] if mode == "optimistic" else change_points.shape[0]
 
-    plt.text(
-        s=f" Number of inferred triangles: {ni} \n Number of true triangles: {nu-T}",
-        y=ymax * c,
-        x=xmax * d,
-        fontsize=12,
-        color="purple",
-    )
+    # plt.text(
+    #     s=f" Number of inferred triangles: {ni} \n Number of true triangles: {nu-T}",
+    #     y=ymax * c,
+    #     x=xmax * d,
+    #     fontsize=12,
+    #     color="purple",
+    # )
     my_plt.set_xlabel("Iteration")
 
     if sparse_plot:
@@ -488,23 +493,40 @@ def plot_changepoints_curve(
     plt.xlim(left=x0, right=xmax)
 
     if yscale == "log":
-        my_plt.set_ylabel("NMSE (Log Scale)")
+        my_plt.set_ylabel("F.O. (Log Scale)")
         plt.yscale("log")
     else:
-        my_plt.set_ylabel("NMSE")
+        my_plt.set_ylabel("F.O.")
 
     plt.yticks([])
 
     # Identify the region where y-values change slowly
-    if change_region_len == 0:
-        y_diff = np.abs(np.diff(plt_data["y"]))
-        slow_change_indices = np.where(y_diff < 1e-2)[0]
+    if zoom_region:
+        if change_region_len == 0:
+            y_diff = np.abs(np.diff(plt_data["y"]))
+            slow_change_indices = np.where(y_diff < 1e-2)[0]
 
-        if len(slow_change_indices) > 0:
-            # Select the first significant region of slow change
-            zoom_start = slow_change_indices[0]
-            zoom_end = slow_change_indices[-1]
+            if len(slow_change_indices) > 0:
+                # Select the first significant region of slow change
+                zoom_start = slow_change_indices[0]
+                zoom_end = slow_change_indices[-1]
 
+                sns.lineplot(
+                    x=plt_data["x"].iloc[zoom_start:],
+                    y=plt_data["y"].iloc[zoom_start:],
+                    estimator=None,
+                    sort=False,
+                    ax=ax_inset,
+                )
+        elif change_region_len == None:
+            pass
+        else:
+            zoom_start = change_points[-change_region_len]
+            # zoom_end = len(plt_data["x"])-1
+            # Create inset axes for zoomed-in region
+            ax_inset = inset_axes(
+                my_plt, width="50%", height="40%", loc="center right", borderpad=2
+            )
             sns.lineplot(
                 x=plt_data["x"].iloc[zoom_start:],
                 y=plt_data["y"].iloc[zoom_start:],
@@ -512,53 +534,39 @@ def plot_changepoints_curve(
                 sort=False,
                 ax=ax_inset,
             )
-    elif change_region_len == None:
-        pass
-    else:
-        print(change_points)
-        zoom_start = change_points[-change_region_len]
-        # zoom_end = len(plt_data["x"])-1
-        # Create inset axes for zoomed-in region
-        ax_inset = inset_axes(
-            my_plt, width="50%", height="40%", loc="center right", borderpad=2
-        )
-        sns.lineplot(
-            x=plt_data["x"].iloc[zoom_start:],
-            y=plt_data["y"].iloc[zoom_start:],
-            estimator=None,
-            sort=False,
-            ax=ax_inset,
-        )
-        # Change-points
-        sns.scatterplot(
-            x=np.hstack(
-                [change_points[-change_region_len:], change_points[-change_region_len:]]
-            ),
-            y=np.hstack(
-                [
-                    change_points_y1[-change_region_len:],
-                    change_points_y2[-change_region_len:],
-                ]
-            ),
-            color="purple",
-            marker="d",
-        )
+            # Change-points
+            sns.scatterplot(
+                x=np.hstack(
+                    [
+                        change_points[-change_region_len:],
+                        change_points[-change_region_len:],
+                    ]
+                ),
+                y=np.hstack(
+                    [
+                        change_points_y1[-change_region_len:],
+                        change_points_y2[-change_region_len:],
+                    ]
+                ),
+                color="purple",
+                marker="d",
+            )
 
-    # Set limits for the zoomed-in region
-    # print(zoom_end)
-    # print(plt_data["x"].iloc[zoom_end])
-    # ax_inset.set_xlim(plt_data["x"].iloc[zoom_start], plt_data["x"].iloc[zoom_end])
-    # ax_inset.set_ylim(
-    #     plt_data["y"].iloc[zoom_start:].min(),
-    #     plt_data["y"].iloc[zoom_start:].max(),
-    # )
-    ax_inset.set_xlabel(None)
-    ax_inset.set_ylabel(None)
-    # ax_inset.set_xticks([])
-    ax_inset.set_yticks([])
-    if yscale == "log":
-        ax_inset.set_yscale("log")
-    # ax_inset.set_title("Zoomed-in region", fontsize=10)
+        # Set limits for the zoomed-in region
+        # print(zoom_end)
+        # print(plt_data["x"].iloc[zoom_end])
+        # ax_inset.set_xlim(plt_data["x"].iloc[zoom_start], plt_data["x"].iloc[zoom_end])
+        # ax_inset.set_ylim(
+        #     plt_data["y"].iloc[zoom_start:].min(),
+        #     plt_data["y"].iloc[zoom_start:].max(),
+        # )
+        ax_inset.set_xlabel(None)
+        ax_inset.set_ylabel(None)
+        # ax_inset.set_xticks([])
+        ax_inset.set_yticks([])
+        if yscale == "log":
+            ax_inset.set_yscale("log")
+        # ax_inset.set_title("Zoomed-in region", fontsize=10)
 
     return my_fig
 

@@ -141,7 +141,7 @@ def final_save(func):
         os.makedirs(dir_path, exist_ok=True)
 
         if func.__name__ == "dict_and_topology_learning":
-            filename = f"res_{d}_T{int(prob_T*100)}_pess.pkl"
+            filename = f"res_{d}_T{int(prob_T*100)}_{mode}{k0}.pkl"
         elif func.__name__ == "param_dict_learning":
             filename = f"res_{d}_T{int(prob_T*100)}.pkl"
         elif func.__name__ == "analyt_dict_learning":
@@ -201,7 +201,7 @@ def save_plot(func):
             file_name = f"learnt_topology_T{int(p*100)}_S{k}.png"
 
         elif func_name == "plot_learnt_topology_real":
-            file_name = f"learnt_topology_S{k}_real.png"
+            file_name = f"learnt_topology_S{k}J{j}P{P}.png"
             dir_name = "plots\\real"
 
         elif func_name == "plot_changepoints_curve":

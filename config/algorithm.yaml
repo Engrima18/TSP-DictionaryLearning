@@ -2,13 +2,19 @@ max_sparsity: 26
 min_sparsity: 5
 sparsity_freq: 4
 lambda_: 1e-7
+lambda2: 0.5 # 0.5
+mu: 10 # 15
+max_iter: 1000 # 400
+max_iter_out: 300
+max_iter_tot: 150
+decouple_learning: False
+topo_learning_mode: "optimistic"
 tol: 1e-7
-max_iter: 100
-patience: 5
+tol_out: 0.1 ################
+patience: 10 # 5
 verbose: True
 QP: True
 warmup: 2
 on_test: False
-topo_learning_mode: "optimistic"
 complete: True
 both: False
