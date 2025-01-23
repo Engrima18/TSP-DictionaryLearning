@@ -641,11 +641,14 @@ class TopoSolver:
         third_direction: bool = False,
         Y_tr_pt: torch.Tensor = None,
         Ldj: torch.Tensor = None,
-        tol_out: float = 1e-6,
+        mode: str = "optimistic",
+        max_iter_out: int = 300,
     ) -> Tuple[np.ndarray, np.ndarray, List[float]]:
 
         # Define hyperparameters
         iter_, pat_iter = 1, 0
+        # schedule_mu = True
+        attractor = False
         min_of = np.inf
         train_hist = []
         train_error_hist = []
@@ -750,10 +753,16 @@ class TopoSolver:
                 X_tr = X_tr + step_x * (X_tr_tmp - X_tr)
                 X_te = X_te + step_x * (X_te_tmp - X_te)
 
+                #########################
+                #    Topology Update    #
+                #########################
                 if third_direction:
-                    #########################
-                    #    Topology Update    #
-                    #########################
+                    if iter_ > (max_iter / 2):
+                        attractor = True
+                    # self.mu /= 2
+                    # schedule_mu = False
+                    self.beta = (iter_ - 1) / (iter_ + 2)
+                    # self.beta = 0.6
                     _, _, updated = self.topoGD(
                         Y=Y_tr_pt,
                         Ldj=Ldj,
@@ -761,7 +770,8 @@ class TopoSolver:
                         lambda2=lambda2,
                         autodiff=True,
                         max_iter=1,
-                        tol_out=tol_out,
+                        mode=mode,
+                        one_attractor=attractor,
                     )
 
                 # Error Update
@@ -778,14 +788,12 @@ class TopoSolver:
 
                 if third_direction:
                     print(iter_, of, updated)
-                    if not updated:
+
+                    if not updated or of >= min_of:
                         pat_iter += 1
                     else:
                         pat_iter = 0
-                    # if of >= min_of:
-                    #     pat_iter += 1
-                    # else:
-                    #     pat_iter = 0
+
                     min_of = of
                     self.h_opt = (
                         h_list if self.dictionary_type == "separated" else h_opt
@@ -1108,17 +1116,29 @@ class TopoSolver:
         autodiff: bool = True,
         max_iter: int = 100,
         decoupled: bool = False,
-        tol_out: float = 1e-6,
+        mode: str = "optimistic",  ##############################
+        accelerateGD: bool = True,
         verbose: bool = True,
+        one_attractor: bool = False,
     ):
+        # if accelerateGD:
+        p_tmp = np.copy(self.p)
+        self.v = np.copy(self.p)
+        thresh_mode = "soft3" if one_attractor else "soft2"
+        # c = 1.0 if mode == "optimistic" else 0.0
+        c = 1.0
         train_hist = []
         train_error_hist = []
         i = 1
         updated = True
         while i <= max_iter:
-            p = torch.tensor(self.p, requires_grad=True)
             B2 = torch.tensor(self.B2, dtype=torch.float64)
-            Lu_tmp = B2 @ torch.diag(p) @ B2.T
+            if accelerateGD:
+                v = torch.tensor(self.v, requires_grad=True)
+                Lu_tmp = B2 @ torch.diag(v) @ B2.T
+            else:
+                p = torch.tensor(self.p, requires_grad=True)
+                Lu_tmp = B2 @ torch.diag(p) @ B2.T
             h_list = [torch.from_numpy(h) for h in self.h_opt]
             Luj_tmp = torch.stack(
                 [torch.matrix_power(Lu_tmp, i) for i in range(1, self.J + 1)]
@@ -1128,15 +1148,18 @@ class TopoSolver:
                 X_tr_torch = torch.from_numpy(self.X_opt_train)
                 fo = nmsept(D_tmp, X_tr_torch, Y, self.m_train)
                 fo.backward()
-                grad = p.grad.numpy()
+                grad = v.grad.numpy() if accelerateGD else p.grad.numpy()
             else:
                 raise ValueError(
                     "No Other methods are implemented for f.o. gradient evaluation"
                 )
-            print(f"Before: {self.p}")
-            p = self.p - self.mu * grad
-            p = proximal_op(p, lambda2, hard=False)
-            print(f"After: {p}")
+            if accelerateGD:
+                # p = self.v - self.mu * grad
+                # self.v = self.p + self.beta * (p - self.p)
+                v = self.p + self.beta * (self.p - p_tmp)
+                p = proximal_op(self.v - self.mu * grad, lambda2, mode=thresh_mode)
+            else:
+                p = proximal_op(self.p - self.mu * grad, lambda2, mode=thresh_mode)
             Lu_new = self.B2 @ np.diag(p) @ self.B2.T
             Luj = np.array([la.matrix_power(Lu_new, i) for i in range(1, self.J + 1)])
             D = generate_dictionary(self.h_opt, self.P, Luj, self.Ldj)
@@ -1156,6 +1179,7 @@ class TopoSolver:
                         print(
                             f"Iter {i}: Better!, {error_train:.5f}  -  Error delta: {self.min_error_train-error_train:.5f}"
                         )
+
             h = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1, 1)
             self.min_error_train = error_train
             train_error_hist.append(error_train)
@@ -1163,7 +1187,9 @@ class TopoSolver:
                 error_train + lambda1 * la.norm(h, 2) + lambda2 * la.norm(self.p, 1)
             )
             p_tmp = np.copy(self.p)
-            self.p = p
+            self.p = np.copy(p)
+            if accelerateGD:
+                self.v = np.copy(v)
             self.update_Lu(Lu_new)
             i += 1
 
@@ -1172,10 +1198,12 @@ class TopoSolver:
             if decoupled:
                 updated = False
             else:
+                t1 = 0.85 if one_attractor else 0.95
+                t2 = 0.5 if one_attractor else 0.6
                 if (
-                    np.where(p_tmp == 1.0)[0].shape[0]
-                    == np.where(self.p == 1.0)[0].shape[0]
-                ) and (self.p[(self.p < 0.85) & (self.p > lambda1)].shape[0] == 0):
+                    np.where(p_tmp == c)[0].shape[0]
+                    == np.where(self.p == c)[0].shape[0]
+                ) and (self.p[(self.p < t1) & (self.p > 0.5)].shape[0] == 0):
                     updated = False
         if verbose:
             print(self.p)
@@ -1207,7 +1235,12 @@ class TopoSolver:
 
         train_hist = []
         iter_ = 1
-        self.p = np.ones(self.nu) if mode == "optimistic" else np.zeros(self.nu)
+        self.p = (
+            np.ones(self.nu)
+            if mode == "optimistic"
+            # else np.full(self.nu, lambda2 + 0.1)
+            else np.full(self.nu, 0.75)
+        )
         Y_tr_torch = torch.from_numpy(self.Y_train)
         Ldj = torch.from_numpy(
             self.Ldj,
@@ -1252,6 +1285,7 @@ class TopoSolver:
                     lambda2=lambda2,
                     autodiff=autodiff,
                     max_iter=max_iter_out,
+                    mode=mode,
                     decoupled=True,
                 )
                 if not updated:
@@ -1281,7 +1315,8 @@ class TopoSolver:
                     third_direction=True,
                     Y_tr_pt=Y_tr_torch,
                     Ldj=Ldj,
-                    tol_out=tol_out,
+                    mode=mode,
+                    max_iter_out=max_iter_out,
                 )
 
             except SolverError:
@@ -1295,7 +1330,9 @@ class TopoSolver:
             self.train_history.append(train_hist)
             self.train_error_hist.append(train_error_hist)
 
+        self.p_probs = np.copy(self.p)
         self.p = np.where(self.p <= 0.5, 0, 1)
+        # self.p = np.where(self.p < 0.8, 0, 1)
         self.B2 = self.B2 @ np.diag(self.p)
         self.update_Lu(self.B2 @ self.B2.T)
         try:

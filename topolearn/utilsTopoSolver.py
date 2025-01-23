@@ -248,12 +248,20 @@ def generate_dictionarypt(h, P, *matrices):
     return D
 
 
-def proximal_op(z, lambda_, hard=False):
+def proximal_op(z, lambda_, mode="soft2"):
     # k = lambda_ * mu
     k = lambda_
-    if hard:
+    if mode == "hard":
         np.clip(z, 0, 1, out=z)
-    else:
+    elif mode == "soft":
+        for i in range(len(z)):
+            if z[i] <= k:
+                z[i] = 0
+            elif z[i] > k and z[i] < (1 + k):
+                z[i] -= k
+            else:
+                z[i] = 1
+    elif mode == "soft2":
         for i in range(len(z)):
             if z[i] <= k:
                 z[i] = 0
@@ -261,4 +269,15 @@ def proximal_op(z, lambda_, hard=False):
                 pass
             else:
                 z[i] = 1
+    elif mode == "soft3":
+        l = 1 - k / 2
+        for i in range(len(z)):
+            if z[i] <= k:
+                z[i] = 0
+            elif z[i] > k and z[i] < l:
+                pass
+            else:
+                z[i] = 1
+    else:
+        raise ValueError("Invalid mode. Choose from 'hard', 'soft', or 'soft2")
     return z

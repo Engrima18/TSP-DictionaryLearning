@@ -118,7 +118,7 @@ def dict_and_topology_learning(
         # # "wavelet": ("Hodgelet", "wavelet"),
         # "edge": ("Edge Laplacian", "edge"),
         # "joint": ("Hodge Laplacian", "joint"),
-        "separated": ("Separated Hodge Laplacian", "separated"),
+        # "separated": ("Separated Hodge Laplacian", "separated"),
         "complete": ("Separated Hodge Laplacian with Topology learning", "separated"),
         # "complete_pess": (
         #     "Separated Hodge Laplacian with Pessimistic Topology learning",
@@ -150,13 +150,13 @@ def dict_and_topology_learning(
 
                 opt = False
                 learn_topology = True if "complete" in d[0] else False
-                if "pess" in d[0]:
-                    algo_params["mode"] = "pessimistic"
-                else:
-                    algo_params["mode"] = "optimistic"
-                    opt = True
+                # if "pess" in d[0]:
+                #     algo_params["mode"] = "pessimistic"
+                # else:
+                #     algo_params["mode"] = "optimistic"
+                #     opt = True
 
-                    # try:
+                # try:
                 (
                     dict_errors[d[0]][0][sim, k0_index],
                     dict_errors[d[0]][1][sim, k0_index],
@@ -168,8 +168,8 @@ def dict_and_topology_learning(
                     **algo_params,
                 )
 
-                if opt:
-                    models[eval(f"{sim},{k0_index}")].append(model)
+                # if opt:
+                models[eval(f"{sim},{k0_index}")].append(model)
 
                 if verbose:
                     logging.info(
@@ -270,7 +270,7 @@ def main(cfg: DictConfig):
     # K0_coll = np.arange(
     #     algo_cfg.min_sparsity, algo_cfg.max_sparsity, algo_cfg.sparsity_freq
     # )
-    K0_coll = np.array([25])
+    K0_coll = np.array([21])
 
     log_configurations(cfg, hydra.compose(config_name="algorithm.yaml"))
 
