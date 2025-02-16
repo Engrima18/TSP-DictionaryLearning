@@ -1,22 +1,28 @@
 max_sparsity: 26
 min_sparsity: 5
 sparsity_freq: 4
-lambda_: 1e-1 # 1e-7 per T>=T60 # 1e-2 o 1e-3 per T50
-lambda2: 0.2 # 0.5  per T>=T60 # 0.1 per T50
-mu: 10 # 10 per T70
-# beta: 0.9
+lambda_: 1e-1
+lambda2: 0.3
+mu: 5
 # accelerateGD: False
-max_iter: 1000 # 400 per T>= 50
+max_iter: 800
 max_iter_out: 100
 max_iter_tot: 150
 decouple_learning: False
 topo_learning_mode: "optimistic"
 tol: 1e-7
-tol_out: 0.1 ################
-patience: 10 # 5
+tol_out: 1e-3
+patience: 10
 verbose: True
 QP: True
-warmup: 2
+warmup: 0
 on_test: False
 complete: True
 both: False
+# Part only for topo_learn.py
+algo_sparsity: 15
+tr_list: [0.6, 0.7, 0.8, 0.9]
+mu_schedule: [5, 5, 5, 5] # [2, 5, 5, 2, 1, 5]
+lambda_schedule: [1e-2, 1e-2, 1e-2, 1e-2]
+mi_schedule: [700, 600, 500, 500] # [1200, 800, 200, 800, 900, 300]
+algo: "soft"

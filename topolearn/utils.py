@@ -226,3 +226,32 @@ def save_plot(func):
         return plot
 
     return wrapper
+
+
+def track_performances(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        process = psutil.Process()
+        cpu_start = process.cpu_times()
+        mem_start = process.memory_info().rss  # Resident Set Size (RSS) in bytes
+
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+
+        cpu_end = process.cpu_times()
+        mem_end = process.memory_info().rss
+
+        performance_data = {
+            "execution_time": end_time - start_time,
+            "memory_usage_mb": (mem_end - mem_start) / (1024 * 1024),
+            "cpu_time_user": cpu_end.user - cpu_start.user,
+            "cpu_time_system": cpu_end.system - cpu_start.system,
+        }
+
+        return (
+            result,
+            performance_data,
+        )
+
+    return wrapper

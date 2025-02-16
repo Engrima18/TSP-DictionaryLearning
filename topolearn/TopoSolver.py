@@ -13,6 +13,8 @@ import pickle
 from functools import wraps
 from einops import rearrange, reduce
 import torch
+import time
+import psutil
 
 
 class TopoSolver:
@@ -110,6 +112,7 @@ class TopoSolver:
         # Init the learning errors and error curve (history)
         self.min_error_train = 1e20
         self.min_error_test = 1e20
+        self.global_min = 1e20
         self.train_history: List[np.ndarray] = []
         self.test_history: List[np.ndarray] = []
         self.train_error_hist: List[np.float64] = []
@@ -382,7 +385,7 @@ class TopoSolver:
                 _, Dx = sla.eig(L)
                 dd = la.norm(Dx, axis=0)
                 W = np.diag(1.0 / dd)
-                Dx = Dx / la.norm(Dx)
+                # Dx = Dx / la.norm(Dx)
                 Domp = Dx @ W
                 X = np.apply_along_axis(
                     lambda x: get_omp_coeff(self.K0, Domp.real, x),
@@ -646,7 +649,7 @@ class TopoSolver:
     ) -> Tuple[np.ndarray, np.ndarray, List[float]]:
 
         # Define hyperparameters
-        iter_, pat_iter = 1, 0
+        iter_, pat_iter, pat_iter2 = 1, 0, 0
         # schedule_mu = True
         attractor = False
         min_of = np.inf
@@ -661,13 +664,17 @@ class TopoSolver:
             h_opt = np.hstack([h.flatten() for h in self.h_opt]).reshape(-1, 1)
             X_tr = self.X_opt_train
             X_te = self.X_opt_test
+            D = self.D_opt
             f = 2 if self.dictionary_type == "separated" else 1
             reg = lambda_ * np.eye(self.P * (f * self.J + 1))
             I_s = cp.Constant(np.eye(self.P))
             i_s = cp.Constant(np.ones((self.P, 1)))
             B = cp.Constant(self.B.real)
+            patience2 = 60
 
-            while pat_iter < patience and iter_ <= max_iter:
+            while (
+                pat_iter <= patience and pat_iter2 < patience2
+            ) and iter_ <= max_iter:
 
                 #########################
                 #   Dictionary Update   #
@@ -738,6 +745,8 @@ class TopoSolver:
                     D = generate_dictionary(h_list, self.P, self.Luj, self.Ldj)
                     h_opt = h_opt + step_h * (h.value - h_opt)
 
+                error_train_tmp = nmse(D, X_tr, self.Y_train, self.m_train)
+
                 #########################
                 #     Sparse Coding     #
                 #########################
@@ -753,17 +762,20 @@ class TopoSolver:
                 X_tr = X_tr + step_x * (X_tr_tmp - X_tr)
                 X_te = X_te + step_x * (X_te_tmp - X_te)
 
+                error_train = nmse(D, X_tr, self.Y_train, self.m_train)
+                if (error_train - error_train_tmp) > 1e-2:
+                    print("Check Alarmmmmmmmmmmmmmmmmmmmmmmmmmmm")
+                    print(f"{error_train - error_train_tmp}")
+                    break
+
                 #########################
                 #    Topology Update    #
                 #########################
                 if third_direction:
-                    if iter_ > (max_iter / 2):
+                    if iter_ > (max_iter / 3):
                         attractor = True
-                    # self.mu /= 2
-                    # schedule_mu = False
-                    self.beta = (iter_ - 1) / (iter_ + 2)
-                    # self.beta = 0.6
-                    _, _, updated = self.topoGD(
+                    self.beta = (iter_ - 2) / (iter_ + 1)
+                    _, _, updated, error_train, D = self.topoGD(
                         Y=Y_tr_pt,
                         Ldj=Ldj,
                         lambda1=lambda_,
@@ -774,12 +786,11 @@ class TopoSolver:
                         one_attractor=attractor,
                     )
 
-                # Error Update
-                error_train = nmse(D, X_tr, self.Y_train, self.m_train)
+                # Test Error Update
                 error_test = nmse(D, X_te, self.Y_test, self.m_test)
 
                 # If learning also the topology do not stop the ADMM according to the NMSE
-                # but look at the Objective Function (comprehensive of the topology regularization)
+                # but look at the Objective Function (comprehensive of the regularization terms)
                 of = (
                     error_train
                     + lambda_ * la.norm(h_opt, 2)
@@ -787,7 +798,7 @@ class TopoSolver:
                 )
 
                 if third_direction:
-                    print(iter_, of, updated)
+                    print(iter_, of, updated, error_train)
 
                     if not updated or of >= min_of:
                         pat_iter += 1
@@ -809,6 +820,7 @@ class TopoSolver:
 
                 # If the ADMM is only for TDL use the MSE as stopping criterion
                 else:
+                    print(iter_, self.min_error_train)
                     if (
                         (error_train < self.min_error_train)
                         and (abs(error_train) > np.finfo(float).eps)
@@ -1061,17 +1073,22 @@ class TopoSolver:
             candidate_error = int(candidate_error * 1000)
             current_min = int(current_min * 1000)
             self.warmup -= 1
-
+        print("TRY", candidate_error)
         if candidate_error <= current_min:
             S = sigmas.sigma[idx_min]
             Lu_new = self.B2 @ S @ self.B2.T
             filter = np.diagonal(S)
             self.opt_upper += 1
+            if on_test:
+                self.min_error_test = candidate_error
+            else:
+                self.min_error_train = candidate_error
+                self.train_error_hist.append([candidate_error])
 
             if verbose:
                 if mode == "optimistic":
                     print(
-                        f"Removing {self.opt_upper} triangles from the topology... \n ... The min error: {candidate_error:.3f} !"
+                        f"Removing {self.opt_upper} triangles from the topology... \n ... The min error: {candidate_error} !"
                     )
                 else:
                     print(
@@ -1116,17 +1133,17 @@ class TopoSolver:
         autodiff: bool = True,
         max_iter: int = 100,
         decoupled: bool = False,
-        mode: str = "optimistic",  ##############################
-        accelerateGD: bool = True,
+        mode: str = "optimistic",
+        accelerateGD: bool = False,
         verbose: bool = True,
-        one_attractor: bool = False,
+        one_attractor: bool = True,
     ):
         # if accelerateGD:
         p_tmp = np.copy(self.p)
         self.v = np.copy(self.p)
         thresh_mode = "soft3" if one_attractor else "soft2"
-        # c = 1.0 if mode == "optimistic" else 0.0
-        c = 1.0
+        c = 1.0 if mode == "optimistic" else 0.5
+        # c = 1.0
         train_hist = []
         train_error_hist = []
         i = 1
@@ -1145,7 +1162,8 @@ class TopoSolver:
             )
             D_tmp = generate_dictionarypt(h_list, self.P, Luj_tmp, Ldj)
             if autodiff:
-                X_tr_torch = torch.from_numpy(self.X_opt_train)
+                X_tr_torch = torch.tensor(self.X_opt_train, dtype=torch.float64)
+                # print(D_tmp.dtype, X_tr_torch.dtype, Y.dtype)
                 fo = nmsept(D_tmp, X_tr_torch, Y, self.m_train)
                 fo.backward()
                 grad = v.grad.numpy() if accelerateGD else p.grad.numpy()
@@ -1193,21 +1211,27 @@ class TopoSolver:
             self.update_Lu(Lu_new)
             i += 1
 
-        # Check if GD actually updated the topology (useful only in "Decoupled" mode)
+        # Check if GD actually updated the topology
         if i == 2:
             if decoupled:
                 updated = False
             else:
-                t1 = 0.85 if one_attractor else 0.95
-                t2 = 0.5 if one_attractor else 0.6
-                if (
-                    np.where(p_tmp == c)[0].shape[0]
-                    == np.where(self.p == c)[0].shape[0]
-                ) and (self.p[(self.p < t1) & (self.p > 0.5)].shape[0] == 0):
-                    updated = False
+                t1 = 0.75 if one_attractor else 0.98
+                if mode == "optimistic":
+                    t2 = 0.5 if one_attractor else 0.6
+                    if (
+                        np.where(p_tmp == c)[0].shape[0]
+                        == np.where(self.p == c)[0].shape[0]
+                    ) and (self.p[(self.p < t1) & (self.p > t2)].shape[0] == 0):
+                        updated = False
+                else:
+                    t2 = 0.3 if one_attractor else 0.4
+                    if self.p[(self.p < t1) & (self.p > t2)].shape[0] == 0:
+                        updated = False
+
         if verbose:
             print(self.p)
-        return train_hist, train_error_hist, updated
+        return train_hist, train_error_hist, updated, error_train, D
 
     def JTDL(
         self,
@@ -1239,7 +1263,7 @@ class TopoSolver:
             np.ones(self.nu)
             if mode == "optimistic"
             # else np.full(self.nu, lambda2 + 0.1)
-            else np.full(self.nu, 0.75)
+            else np.full(self.nu, 0.5)
         )
         Y_tr_torch = torch.from_numpy(self.Y_train)
         Ldj = torch.from_numpy(
@@ -1278,7 +1302,7 @@ class TopoSolver:
                 #########################
                 #    Topology Update    #
                 #########################
-                train_hist, train_error_hist, updated = self.topoGD(
+                train_hist, train_error_hist, updated, _ = self.topoGD(
                     Y=Y_tr_torch,
                     Ldj=Ldj,
                     lambda1=lambda1,
@@ -1332,6 +1356,7 @@ class TopoSolver:
 
         self.p_probs = np.copy(self.p)
         self.p = np.where(self.p <= 0.5, 0, 1)
+        print(self.p)  #####################
         # self.p = np.where(self.p < 0.8, 0, 1)
         self.B2 = self.B2 @ np.diag(self.p)
         self.update_Lu(self.B2 @ self.B2.T)
@@ -1367,6 +1392,36 @@ class TopoSolver:
             self.Lu,
             self.B2,
         )
+
+    def track_performances(method):
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            process = psutil.Process()
+            cpu_start = process.cpu_times()
+            mem_start = process.memory_info().rss  # Resident Set Size (RSS) in bytes
+
+            start_time = time.time()
+            result = method(self, *args, **kwargs)
+            end_time = time.time()
+
+            cpu_end = process.cpu_times()
+            mem_end = process.memory_info().rss
+
+            performance_data = {
+                "execution_time": end_time - start_time,
+                "memory_usage_mb": (mem_end - mem_start) / (1024 * 1024),
+                "cpu_time_user": cpu_end.user - cpu_start.user,
+                "cpu_time_system": cpu_end.system - cpu_start.system,
+            }
+
+            # Store in an instance attribute
+            if not hasattr(self, "performance_metrics"):
+                self.performance_metrics = {}
+            self.performance_metrics[method.__name__] = performance_data
+
+            return result
+
+        return wrapper
 
     def save_results(func):
         """Decorator to save intermediate results when testing learning functions"""
@@ -1548,6 +1603,7 @@ class TopoSolver:
             return self.nu + self.opt_upper
         return self.nu - self.T
 
+    @track_performances
     def fit(
         self, Lu_true, init_mode="only_X", learn_topology=True, soft=True, **hyperparams
     ):

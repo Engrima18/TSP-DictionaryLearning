@@ -40,10 +40,9 @@ def load_topology(topo_params: dict):
     Lu_full = G.get_laplacians(sub_size=sub_size, full=True)
 
     # Sub-sampling
-    B1 = B1[:, :sub_size]
-    B2 = B2[:sub_size, :]
-    B2 = B2[:, np.sum(np.abs(B2), axis=0) == 3]
-    B2_true = B2 @ G.mask
+    B1, B2 = G.sub_size_skeleton(B1, B2, sub_size=sub_size)
+    B2 = G.triangles_only(B2)
+    B2_true = G.mask_B2(B2)
 
     # Calculate dimensions
     nu = B2.shape[1]

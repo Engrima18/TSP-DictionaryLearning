@@ -144,6 +144,7 @@ def nmsept(D, X, Y, m):
     Returns:
     torch.Tensor: The NMSE value.
     """
+
     reconstruction_error = torch.norm(Y - torch.matmul(D, X), dim=0) ** 2
     original_norm = torch.norm(Y, dim=0) ** 2
     return (1 / m) * torch.sum(reconstruction_error / original_norm)
@@ -270,7 +271,8 @@ def proximal_op(z, lambda_, mode="soft2"):
             else:
                 z[i] = 1
     elif mode == "soft3":
-        l = 1 - k / 2
+        # l = 1 - k / 2
+        l = 0.95
         for i in range(len(z)):
             if z[i] <= k:
                 z[i] = 0

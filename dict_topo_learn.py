@@ -107,21 +107,28 @@ def dict_and_topology_learning(
         "edge": (min_error_edge_train, min_error_edge_test, approx_edge),
         "joint": (min_error_joint_train, min_error_joint_test, approx_joint),
         "separated": (min_error_sep_train, min_error_sep_test, approx_sep),
-        "complete": (min_error_complete_train, min_error_complete_test, approx_comp),
-        "complete_pess": (min_error_pess_train, min_error_pess_test, approx_pess),
+        "complete_soft": (
+            min_error_complete_train,
+            min_error_complete_test,
+            approx_comp,
+        ),
+        "complete_greedy": (min_error_pess_train, min_error_pess_test, approx_pess),
     }
 
     dict_types = {
         # "classic_fourier": ("Fourier", "classic_fourier"),
-        # "fourier": ("Topological Fourier", "fourier"),
+        "fourier": ("Topological Fourier", "fourier"),
         # # "slepians": ("Topological Slepians", "slepians"),
         # # "wavelet": ("Hodgelet", "wavelet"),
-        # "edge": ("Edge Laplacian", "edge"),
-        # "joint": ("Hodge Laplacian", "joint"),
+        "edge": ("Edge Laplacian", "edge"),
+        "joint": ("Hodge Laplacian", "joint"),
         # "separated": ("Separated Hodge Laplacian", "separated"),
-        "complete": ("Separated Hodge Laplacian with Topology learning", "separated"),
-        # "complete_pess": (
-        #     "Separated Hodge Laplacian with Pessimistic Topology learning",
+        # "complete_greedy": (
+        #     "Separated Hodge Laplacian with Greedy Topology learning",
+        #     "separated",
+        # ),
+        # "complete_soft": (
+        #     "Separated Hodge Laplacian with Topology learning",
         #     "separated",
         # ),
     }
@@ -129,6 +136,9 @@ def dict_and_topology_learning(
     models = {}
 
     for sim in tqdm(range(n_sim)):
+
+        # if sim != 4:
+        #     continue
 
         for k0_index, k0 in tqdm(enumerate(K0_coll), leave=False):
 
@@ -148,51 +158,47 @@ def dict_and_topology_learning(
                     **init_params,
                 )
 
-                opt = False
                 learn_topology = True if "complete" in d[0] else False
-                # if "pess" in d[0]:
-                #     algo_params["mode"] = "pessimistic"
-                # else:
-                #     algo_params["mode"] = "optimistic"
-                #     opt = True
+                soft = False if "greedy" in d[0] else True
 
-                # try:
-                (
-                    dict_errors[d[0]][0][sim, k0_index],
-                    dict_errors[d[0]][1][sim, k0_index],
-                    dict_errors[d[0]][2][sim, k0_index],
-                ) = model.fit(
-                    Lu_true=Lu_true,
-                    init_mode="only_X",
-                    learn_topology=learn_topology,
-                    **algo_params,
-                )
-
-                # if opt:
-                models[eval(f"{sim},{k0_index}")].append(model)
-
-                if verbose:
-                    logging.info(
-                        f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Done! Test Error: {dict_errors[d[0]][1][sim,k0_index]:.3f}"
-                    )
-                    logging.info(
-                        f"Topology Approx. Error: {dict_errors[d[0]][2][sim,k0_index]:.6f}"
+                try:
+                    (
+                        dict_errors[d[0]][0][sim, k0_index],
+                        dict_errors[d[0]][1][sim, k0_index],
+                        dict_errors[d[0]][2][sim, k0_index],
+                    ) = model.fit(
+                        Lu_true=Lu_true,
+                        init_mode="only_X",
+                        learn_topology=learn_topology,
+                        soft=soft,
+                        **algo_params,
                     )
 
-                # except Exception as e:
-                #     logging.error(
-                #         f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
-                #     )
+                    if learn_topology:
+                        models[eval(f"{sim},{k0_index}")].append(model)
 
-                #     (
-                #         dict_errors[d[0]][0][sim, k0_index],
-                #         dict_errors[d[0]][1][sim, k0_index],
-                #         dict_errors[d[0]][2][sim, k0_index],
-                #     ) = (
-                #         None,
-                #         None,
-                #         None,
-                #     )
+                    if verbose:
+                        logging.info(
+                            f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Done! Test Error: {dict_errors[d[0]][1][sim,k0_index]:.3f}"
+                        )
+                        logging.info(
+                            f"Topology Approx. Error: {dict_errors[d[0]][2][sim,k0_index]:.6f}"
+                        )
+
+                except Exception as e:
+                    logging.error(
+                        f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
+                    )
+
+                    (
+                        dict_errors[d[0]][0][sim, k0_index],
+                        dict_errors[d[0]][1][sim, k0_index],
+                        dict_errors[d[0]][2][sim, k0_index],
+                    ) = (
+                        None,
+                        None,
+                        None,
+                    )
 
     # dict_errors = handle_diverged(dict_errors)
 
@@ -267,11 +273,10 @@ def main(cfg: DictConfig):
     print(Y_train.shape)
     # Load algorithmic configurations
     algo_cfg = hydra.compose(config_name="algorithm.yaml")
-    # K0_coll = np.arange(
-    #     algo_cfg.min_sparsity, algo_cfg.max_sparsity, algo_cfg.sparsity_freq
-    # )
-    K0_coll = np.array([21])
-
+    K0_coll = np.arange(
+        algo_cfg.min_sparsity, algo_cfg.max_sparsity, algo_cfg.sparsity_freq
+    )
+    # K0_coll = np.array([13])
     log_configurations(cfg, hydra.compose(config_name="algorithm.yaml"))
 
     simulation_params = {
