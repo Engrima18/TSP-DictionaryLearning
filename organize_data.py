@@ -4,8 +4,9 @@ import numpy as np
 import pandas as pd
 import re
 import glob
-
-print
+import hydra
+from omegaconf import DictConfig
+from utils import *
 
 
 def get_pickle_files(directory):
@@ -15,13 +16,6 @@ def get_pickle_files(directory):
 
 def extract_info(file):
     s_pre = file.split(".")[0]
-    # matches = re.findall(r"(?<=[A-Za-z])((?:\d{2})+)", s_pre)
-    # tr_list = []
-    # for match in matches:
-    #     tr_list.extend([int(match[i : i + 2]) for i in range(0, len(match), 2)])
-    # word_match = re.search(r"(greedy|soft)", s_pre)
-    # algo_method = word_match.group(1) if word_match else None
-
     match = re.search(r"(greedy|soft)((?:\d{2})+)", s_pre)
     if match:
         algo_method = match.group(1)
@@ -38,20 +32,32 @@ def extract_info(file):
     return tr_list, algo_method, models, dict_errors
 
 
-def organize_data(sparsity_mode="max"):
+@hydra.main(config_path="config", config_name="config.yaml", version_base=None)
+def organize_data(cfg: DictConfig, sparsity_mode: str = "max"):
     path = os.getcwd()
     df = pd.DataFrame()
     df_mse = pd.DataFrame()
     data_sparsity = [5, 15]  # [5, 15, 25]
+    topo_params = {
+        "p_edges": cfg.p_edges,
+        "n": cfg.n,
+        "seed": cfg.seed,
+        "sub_size": cfg.sub_size,
+    }
     for s in data_sparsity:
         directory = f"{path}\\results\\final\\{sparsity_mode}_sparsity{s}"
         files = get_pickle_files(directory)
         for file in files:
             print(file)
             tr_list, algo_method, models, dict_errors = extract_info(file)
-            # print(tr_list)
+
             for i, p in enumerate(tr_list):
+                topo_params["p_triangles"] = p / 100
+                print(p)
+                topology_data = load_topology(topo_params=topo_params)
+                p_star = polygons_indicator(topology_data["B2_true"])
                 for sim in range(10):
+                    p_hat = polygons_indicator(models[i][(sim, 0)][0].B2)
                     df = pd.concat(
                         [
                             df,
@@ -64,6 +70,7 @@ def organize_data(sparsity_mode="max"):
                                     "Sim": sim,
                                     "Sparsity": s,
                                     "Triangles": p,
+                                    "Error2": error_rate(p_star, p_hat),
                                 }
                             ),
                         ]

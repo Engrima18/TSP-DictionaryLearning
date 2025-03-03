@@ -93,3 +93,11 @@ def handle_diverged(res):
         res[d] = correct_values(res[d])
 
     return res
+
+
+def polygons_indicator(B2):
+    return np.where(np.sum(B2, axis=0) > 0, 1, 0)
+
+
+def error_rate(v1, v2):
+    return np.sum(v1 != v2) / len(v1)

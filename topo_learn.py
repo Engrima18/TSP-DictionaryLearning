@@ -141,44 +141,44 @@ def dict_and_topology_learning(
                 learn_topology = True if "complete" in d[0] else False
                 soft = False if "greedy" in d[0] else True
 
-                try:
-                    (
-                        dict_errors[d[0]][0][sim, k0_index],
-                        dict_errors[d[0]][1][sim, k0_index],
-                        dict_errors[d[0]][2][sim, k0_index],
-                    ) = model.fit(
-                        Lu_true=Lu_true,
-                        init_mode="only_X",
-                        learn_topology=learn_topology,
-                        soft=soft,
-                        **algo_params,
+                # try:
+                (
+                    dict_errors[d[0]][0][sim, k0_index],
+                    dict_errors[d[0]][1][sim, k0_index],
+                    dict_errors[d[0]][2][sim, k0_index],
+                ) = model.fit(
+                    Lu_true=Lu_true,
+                    init_mode="only_X",
+                    learn_topology=learn_topology,
+                    soft=soft,
+                    **algo_params,
+                )
+
+                if learn_topology:
+                    models[eval(f"{sim},{k0_index}")].append(model)
+
+                if verbose:
+                    logging.info(
+                        f"Tri: {init_params['true_prob_T']} Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Done! Test Error: {dict_errors[d[0]][1][sim,k0_index]:.3f}"
+                    )
+                    logging.info(
+                        f"Topology Approx. Error: {dict_errors[d[0]][2][sim,k0_index]:.6f}"
                     )
 
-                    if learn_topology:
-                        models[eval(f"{sim},{k0_index}")].append(model)
+                # except Exception as e:
+                #     logging.error(
+                #         f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
+                #     )
 
-                    if verbose:
-                        logging.info(
-                            f"Tri: {init_params['true_prob_T']} Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Done! Test Error: {dict_errors[d[0]][1][sim,k0_index]:.3f}"
-                        )
-                        logging.info(
-                            f"Topology Approx. Error: {dict_errors[d[0]][2][sim,k0_index]:.6f}"
-                        )
-
-                except Exception as e:
-                    logging.error(
-                        f"Simulation: {sim+1}/{n_sim} Sparsity: {k0} Testing {d[1][0]}... Diverged!"
-                    )
-
-                    (
-                        dict_errors[d[0]][0][sim, k0_index],
-                        dict_errors[d[0]][1][sim, k0_index],
-                        dict_errors[d[0]][2][sim, k0_index],
-                    ) = (
-                        None,
-                        None,
-                        None,
-                    )
+                #     (
+                #         dict_errors[d[0]][0][sim, k0_index],
+                #         dict_errors[d[0]][1][sim, k0_index],
+                #         dict_errors[d[0]][2][sim, k0_index],
+                #     ) = (
+                #         None,
+                #         None,
+                #         None,
+                #     )
 
     # dict_errors = handle_diverged(dict_errors)
 
